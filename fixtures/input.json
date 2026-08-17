@@ -1,7 +1,6 @@
 {
-  "tasks": [
-    { "task_name": "sorted_ascending", "numbers": [3, 1, 2] },
-    { "task_name": "with_negatives", "numbers": [0, -5, 10, -1] },
-    { "task_name": "single", "numbers": [42] }
-  ]
+  "seed": 1,
+  "num_instances": 24,
+  "max_steps_per_episode": 3000,
+  "deadline_ms": 500
 }

@@ -1,5 +1,7 @@
-# VENDORED from apex-competition-sdk v0.3.0 (src/apex_sdk/gym_v1/), import root rewritten
-# apex_sdk.gym_v1 -> gym_v1. Do not hand-edit; re-vendor from the toolkit to update.
+# VENDORED from macrocosm-os/apex-competitions-builder @ d063d9028dbec4bb15182794496f4aa2aac19d49
+# (src/apex_sdk/gym_v1/), import root rewritten apex_sdk.gym_v1 -> gym_v1.
+# Do not hand-edit; re-vendor from the toolkit to update.
+
 """Referee-side HTTP client for talking to a gym_v1 player sandbox.
 
 The referee constructs one PlayerClient per URL in PLAYER_URLS and drives the match

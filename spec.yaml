@@ -1,65 +1,89 @@
 schema: apex.competition.v1
-id: hello_world
+id: box_scramble
 version: 0.1.0
-display_name: "Hello World"
+display_name: "Box Scramble"
 kind: solo
 process_type: cpu
 
+# Fork of Humanoid Parkour (macrocosm-os/apex-competition-humanoid-parkour). Same robot, same
+# gym_v1 interface, same resource profile to start with -- the fork changes the OBSTACLE (a
+# per-round-sampled box field in a 12 m x 6 m room) rather than the runtime contract, so the
+# upstream competition's own measured resource numbers are the right starting prior. Re-measure
+# before onboarding rather than trusting this note (HANDOFF.md SS4 requires it): box free-body
+# physics is more expensive per step than parkour's static geometry (more active contacts), and
+# this spec has not yet been profiled under its own limits the way upstream's was.
 resources:
-  cpu_limit: 1
-  mem_limit: 512Mi
+  cpu_limit: 2
+  mem_limit: 1.5Gi
   gpu_count: 0
 
-# `image` is the PLAYER image (the miner submission server), built by .github/workflows/release.yml
-# from player/Dockerfile and pushed to GHCR.
-#
-# TODO (placeholder digests): the digests below are zeros. After the first tagged release run,
-# copy the pushed digests from the Actions log into `image.digest` and `referee.image.digest` —
-# the platform pins by digest and rejects tags, so a spec with zeros will not sync.
+# PLACEHOLDER -- fill in from your own release workflow once built, cosign-signed and pushed by
+# digest (see .github/workflows/release.yml). Do not activate against a tag; the platform pins
+# and verifies by digest only.
 image:
-  ref: ghcr.io/macrocosm-os/apex-competition-hello-world-player
-  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  ref: ghcr.io/macrocosm-os/apex-competition-box-scramble-player
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000
 
+# ONNX artifact, identical interface contract to upstream parkour: obs [batch,104] + state_in
+# [batch,256] -> action [batch,12] + state_out [batch,256], float32. Kept identical on purpose --
+# see docs/design.md "Why the interface didn't change" -- so a submission is a pure statement
+# about the new task, not a new format to learn.
 submission:
-  artifact_type: code
-  max_size_mb: 1
-  target_path: /app/submission.py
+  artifact_type: onnx
+  max_size_mb: 15
+  target_path: /app/submission.onnx
 
-screening:            # Layer-1 generic screener config (code artifact_type -> ASTGuard)
-  max_size_mb: 1
-  extra_forbidden_modules: [socket, subprocess]
+screening:            # Layer-1 generic weights validator (onnx artifact_type)
+  max_size_mb: 15
+  min_weight_bytes: 10000        # rejects near-empty graphs / constant policies
+  max_code_weight_ratio: 0.1     # ignored for onnx -- a graph carries no code
+
 input_schema:
   $ref: ./input.schema.json
 
 defaults:
   baseline_score: 0.0
+  # 0.0 by choice, same reasoning as upstream parkour: this is the platform's ENTRY BAR
+  # (score_to_beat = max(this, top_raw) * 1.01) and must not sit above the true measured
+  # baseline or the round stalls forever. Replace with the measured baseline/PROVENANCE.md
+  # number before onboarding (HANDOFF.md SS2/SS4) -- unmeasured here because the baseline for
+  # THIS course (box contact dynamics, not parkour's fixed geometry) has not been run yet.
   baseline_raw_score: 0.0
-  round_length_in_days: 1
-  submission_reveal_days: 1
+  round_length_in_days: 2
+  submission_reveal_days: 5      # trained policies carry real R&D; protect them, same as upstream
   lower_is_better: false
 
 entrypoints:
-  # A solo eval is a 1-player duel. `evaluate` runs the PLAYER sandbox: the miner submission
-  # is mounted at target_path and served as an HTTP API that the referee drives.
+  # The PLAYER sandbox: serves the ONNX policy over gym_v1; the referee drives it one
+  # observation at a time. timeout_s inherited from upstream parkour's measured worst case
+  # (24 instances x <=3000 steps, ~750 s) as a starting point -- RE-MEASURE before onboarding:
+  # box contact resolution (up to 20 active free bodies vs. parkour's static geometry) very
+  # plausibly costs more per physics step than parkour's baseline did, which would push this
+  # closer to or past the referee timeout below and require either raising both timeouts or
+  # cutting num_instances / max_steps_per_episode in the round input.
   evaluate:
     command: ["python", "/app/launch.py", "--port", "8000"]
     network_disabled: false   # the referee must reach the player on the per-job network
     allow_internet: false
-    timeout_s: 120
+    timeout_s: 1200
     http_api:
       port: 8000
       readiness_path: /health
       protocol: gym_v1
 
-# The competition-owned scorer sandbox (holds the game engine + scoring). Runs /app/referee.py,
-# drives the player over the network, and writes /data/result.json. Isolated from the submission.
+# The scorer sandbox: MuJoCo physics, the G1 model, the room + box field, termination gates,
+# scoring. No generate_round entrypoint: the suite is a pure function of the round input, same as
+# upstream (env/course.sample_boxes derives the whole box field from the injected SEED).
 referee:
   protocol: gym_v1
   image:
-    ref: ghcr.io/macrocosm-os/apex-competition-hello-world-referee
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
-  timeout_s: 120
+    ref: ghcr.io/macrocosm-os/apex-competition-box-scramble-referee
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000
+  timeout_s: 900   # RE-MEASURE (see entrypoints.evaluate.timeout_s note above) before onboarding
 
 signature:
-  cosign_identity: https://github.com/macrocosm-os/apex-competition-hello-world/.github/workflows/release.yml
+  # The `@refs/tags/*` suffix is REQUIRED -- see upstream parkour's spec.yaml comment for why a
+  # bare workflow path silently fails every registry sync pass. Point this at YOUR OWN repo's
+  # release workflow once the box-scramble repo has one; do not reuse humanoid-parkour's identity.
+  cosign_identity: https://github.com/macrocosm-os/apex-competition-box-scramble/.github/workflows/release.yml@refs/tags/*
   cosign_issuer: https://token.actions.githubusercontent.com

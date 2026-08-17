@@ -1,27 +1,52 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "hello_world round input",
-  "description": "One round is a batch of tasks. Each task gives the submission a list of numbers to sort; the score is the fraction of tasks sorted correctly.",
+  "title": "box_scramble round input",
+  "description": "Evaluation shape for one round. Unlike upstream Humanoid Parkour (static, public geometry), the box field ITSELF is drawn from `seed` inside the referee (env/course.sample_boxes) -- fixed box count and zone roles (9 scramble / 5 push / 6 climb), sampled size/density/placement. Each instance's wind is drawn from the same seed (env/sim.instance_spec), so the suite differs every round and the box field is identical across every instance within one round.",
   "type": "object",
   "additionalProperties": false,
-  "required": ["tasks"],
+  "required": ["seed", "num_instances", "max_steps_per_episode", "deadline_ms"],
   "properties": {
-    "tasks": {
-      "type": "array",
-      "minItems": 1,
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["task_name", "numbers"],
-        "properties": {
-          "task_name": { "type": "string" },
-          "numbers": {
-            "type": "array",
-            "items": { "type": "number" },
-            "minItems": 1
-          }
-        }
-      }
+    "seed": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Round seed: the whole box field (sizes, densities, placement) AND every instance's wind derive from it. Must be fresh each round, and must not be published while the round is open -- a known seed makes the whole room layout computable offline. Required rather than optional on purpose: a missing seed would silently freeze the box field instead of failing.",
+      "examples": [1]
+    },
+    "num_instances": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 64,
+      "description": "Evaluation instances. Every instance in a round shares the identical box field; only wind varies between them, so this sets how well the suite covers the wind range and how much score noise the round carries -- inherited starting point from upstream parkour (24), NOT yet re-measured for this course's own score variance (see docs/design.md and HANDOFF.md SS4 before onboarding)."
+    },
+    "max_steps_per_episode": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 3000,
+      "default": 3000,
+      "description": "Control-step cap per instance (1 step = 20 ms sim time, so 3000 = 60 s). Inherited from upstream parkour's wall-clock sizing against a 900 s referee timeout; RE-MEASURE before onboarding, since box contact dynamics (up to 20 active free bodies) very plausibly cost more per physics step than parkour's static geometry did, which could push worst-case wall time past this budget at the inherited value."
+    },
+    "deadline_ms": {
+      "type": "integer",
+      "minimum": 50,
+      "maximum": 5000,
+      "description": "Per-/act deadline for the policy, enforced by the referee's HTTP client. Unchanged from upstream."
+    },
+    "wind_max_ms": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 20,
+      "description": "Upper bound of the per-instance wind draw, in m/s; speed is uniform on [0, this] and direction is uniform over the full circle. Default 8.0 (env/sim.WIND_MAX_MS) is Beaufort 4 at the robot, worth 3.6% of body weight in drag -- unchanged from upstream parkour. 0 disables wind. Tunable without a release, but it moves baseline_raw_score."
+    },
+    "record_history": {
+      "type": "boolean",
+      "default": true,
+      "description": "Write one replayable history file per instance to /data/history/, delivered to the miner as FileType.HISTORY. Optional and default-on; a write failure never affects the score."
+    },
+    "history_stride": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 50,
+      "description": "Keep every Nth control step in the history. Default 2 (25 Hz) via env/history.DEFAULT_STRIDE."
     }
   }
 }
