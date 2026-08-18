@@ -8,7 +8,7 @@ budget / hands-on-obstacles) are not re-litigated here; only what this fork chan
 
 ## Why fork Humanoid Parkour rather than start clean
 
-Same robot (Unitree G1, legs-only), same `gym_v1` obs[104]/state[256]/action[12] interface, same
+Same robot family (Unitree G1), same `gym_v1` state[256] recurrent-memory contract, same
 referee/player split, same progress-based scoring shape. What changes is the geometry: instead of
 a fixed sequence of named maneuvers, the robot crosses a room scattered with a per-round-sampled
 box field. Reusing the interface means a miner's understanding of the perception channels (height
@@ -43,6 +43,14 @@ sampled box footprint area works out to ~0.72 sq m ((0.85 m avg side)^2). At 20%
 0.20 x 72 / 0.72 ~= 20 boxes. Split deterministically 9 scramble / 5 push / 6 climb by role (see
 zone design), which is the "fixed number of boxes" in the brief — what's sampled per round is
 each box's size, density, and placement jitter, not the count or the zone roster.
+
+**2026-08-18 update:** count has since been scaled twice alongside the two room-length doublings
+-- 20 -> 60 (Crux: "add more of the blue and yellow boxes", stacked on top of the x3 bump from
+the first length doubling) -> 98 -> 196 (x2 for the second length doubling, "proportionally
+increase the number of objects"). Role ratio has drifted slightly from the original 9:5:6 (now
+roughly 100:60:36, weighted a bit more toward scramble/push after the explicit "more yellow and
+blue" ask) but the fixed-count-not-sampled principle argued below is unchanged, and count still
+lives in `env/course.py` constants (N_SCRAMBLE/N_PUSH/N_CLIMB), not a round input.
 
 **Why fixed, not itself sampled per round — the anti-Goodhart argument.** If box count were drawn
 per round, `raw_score` variance would blend two different things: how skilled a policy is, and how
@@ -94,6 +102,15 @@ floor, closest to the goal so a near-miss still scores well via partial progress
 
 ## Push corridor sizing: what makes a box "pushable"
 
+**2026-08-18 update:** this section was written when the robot was legs-only and could not
+grasp; the robot now has full arm control (see README.md's "The robot has full arm control"
+section and env/sim.py's module docstring), so pushing can now be a genuine two-handed shove/
+brace, not only a body-check. The density band below was NOT re-derived for arm-assisted pushing
+-- it is still calibrated against the body-check case only, and is very plausibly now too
+conservative (a box light enough for a body-check is trivially light for two-handed shoving) --
+flagged in "Open" below as unresolved, not silently assumed to still be correct. Original
+(body-check-only) reasoning kept below for the historical record:
+
 A legs-only G1 (32.1 kg, no arms — see upstream's own audit) cannot grasp; the only way to move a
 box is a sustained body-check, like a person shoulder-checking a light crate while walking through
 it rather than picking it up. Density band (25-90 kg/m^3) is set against real-world anchors —
@@ -109,6 +126,13 @@ driving the stock walker over candidate geometry" — this fork has not yet done
 band because there is no trained-for-this-course baseline yet to drive it with).
 
 ## Climb stack sizing: what makes a pile good footing
+
+**2026-08-18 update:** written when climbing meant leg-mounts only ("a genuine sequential climb"
+below, no hands available). The robot now has arms, so climbing can involve bracing/pulling with
+hands as well as leg mounts -- tier heights below were sized specifically to defeat a ONE-MOTION
+LEG step-up, which is still true and still relevant, but they were not re-audited against what an
+arm-assisted mount changes about climb difficulty. Flagged in "Open" below. Original
+(legs-only) reasoning kept for the historical record:
 
 Two separate properties, both handled through the same density parameter deliberately (rather than
 adding a second free variable): **stability under a standing load** (won't slide/tip when a 32 kg

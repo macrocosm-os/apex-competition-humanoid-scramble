@@ -1,5 +1,18 @@
 """Build baseline/baseline.onnx from Unitree's stock G1 walking policy.
 
+2026-08-18 STATUS: STALE, NOT UPDATED for the 22-DoF/136-obs arm interface (env/sim.py). Crux
+explicitly said, when asking for full arm control, "I do not care about training a baseline
+model -- I trust the miners will do that in no time" -- so this file is being left as-is
+(targeting the OLD 12-DoF/104-obs, legs-only interface) rather than rewritten for a baseline
+nobody asked for. It will NOT run against the current env/sim.py (motion.pt is a 12-DoF
+leg-only LSTM; the observation-slicing indices below assume the old 104-dim layout with no arm
+channels). Do not `python tools/make_baseline.py` expecting a working baseline/baseline.onnx
+until/unless someone explicitly asks for one again -- if that happens, this file needs a full
+rewrite (new obs indices for the 136-dim layout, a policy architecture that actually has arm
+outputs since motion.pt has none, since Unitree's own stock walker doesn't drive arms either).
+
+Original (pre-arms) docstring, kept for whoever revisits this:
+
 The baseline is not trained for this course — it is Unitree's flat-ground `motion.pt` wrapped so
 it speaks the competition's interface. That is deliberate: `defaults.baseline_raw_score` only has
 to be a real, reproducible score that a submission must beat, and shipping the stock walker means

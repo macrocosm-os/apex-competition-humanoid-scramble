@@ -5,55 +5,71 @@
 
 An Apex competition (Bittensor Subnet 1). Fork of
 [Humanoid Parkour](https://github.com/macrocosm-os/apex-competition-humanoid-parkour). Miners
-submit an **ONNX policy** that drives a Unitree G1 humanoid across a 12 m x 6 m room scattered
-with a per-round-sampled field of 20 loose boxes: a dense scramble cluster, a corridor of light
-shovable crates, and a stack of heavy boxes too tall to step onto directly.
+submit an **ONNX policy** that drives a Unitree G1 humanoid across a 48 m x 6 m room scattered
+with a per-round-sampled field of 196 loose boxes: a dense scramble cluster, a corridor of light
+shovable crates, and stacks of heavy boxes too tall to step onto directly.
 
 | | |
 |---|---|
 | id / version | `box_scramble` 0.1.0 |
-| robot | Unitree G1, **12 actuated leg DoF only** — no arm joints, 32.1 kg (unchanged from upstream) |
+| robot | Unitree G1, **22 actuated DoF** — 12 legs + 10 arms (shoulder pitch/roll/yaw, elbow, wrist roll x2 sides), full arm control (2026-08-18, was 12 leg-only DoF) |
 | submission | ONNX graph, ≤ 15 MB, architecture free (same interface as upstream) |
-| interface | `obs[104]` + `state_in[256]` → `action[12]` + `state_out[256]`, float32 |
+| interface | `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]`, float32 (was `obs[104]`/`action[12]` — BREAKING change, 2026-08-18) |
 | evaluation | 24 instances (inherited from upstream, **not yet re-measured for this course** — see docs/design.md), ≤ 3000 control steps each, box field + wind drawn per round |
 | baseline | **not yet built** — see docs/design.md, "Open" |
 
-## The robot has no arms
+## The robot has full arm control (2026-08-18)
 
-Unchanged from upstream: all 12 actuators are legs. The arms are 17.7 kg of collision geometry
-welded to the pelvis — present, with mass, and they hit things, but nothing can move them. That
-means **pushing a box is a body-check, not a shove with hands**, and **climbing a stack is a
-sequence of leg mounts, not a pull-up**. See docs/design.md, "Push corridor sizing" and "Climb
-stack sizing", for exactly how the box field is calibrated against that constraint.
+**Changed from the original fork.** The first version of this course kept upstream's legs-only
+G1 (12 actuated DoF, arms welded as dead collision geometry) on purpose, matching upstream's own
+"push = body-check, climb = leg-mounts only" design. Crux explicitly asked for that reversed:
+*"replace the base model with one that has full control of its arms—this is important as there
+will be pushing, lifting and climbing involved."* The robot now has 10 actuated arm DoF (5 per
+arm: shoulder pitch/roll/yaw, elbow, wrist roll) on top of the unchanged 12 leg DoF —
+**22 actuated DoF total**, up from 12. See `env/assets/g1_22dof.xml` and `env/sim.py`'s module
+docstring for the full spec (joint ranges/torque limits taken from Unitree's own published
+29-DoF G1 model, adapted to this repo's vendored meshes) and what changed as a result (action/
+observation dims, PD gains, default pose — all BREAKING changes to the interface; a submission
+built for the old 12-DoF/104-obs contract will not load here).
+
+This is a genuine one-way-door reversal, not a tweak: `docs/design.md` still carries the ORIGINAL
+design rationale for the legs-only decision as a historical record (it explains real tradeoffs
+that mattered when the course had no arms), immediately followed by the 2026-08-18 update
+explaining why it was reversed. Read both, not just the newest note, if you want the full
+reasoning trail on why arms were added and what it costs (see "Open" below — arm PD gains and
+the new hand-proximity observation channel are unvalidated against a real trained policy, same
+category of gap the original push/climb box-band sizing already carried).
 
 ## The room
 
-12 m long, 6 m wide (aspect 2:1, per the brief this fork was built against). West to east:
+48 m long, 6 m wide (length doubled twice from the original 12 m brief; width unchanged — see
+docs/design.md for why the room is no longer 2:1). West to east:
 
 | Zone | Extent | Boxes | Forces |
 |---|---|---|---|
-| start apron | 0.0 – 2.0 m | 0 | settle into gait |
-| **scramble field** | 2.0 – 5.0 m | 9 | weaving — two staggered rows spanning the full width; no lane has a clean straight line through |
-| **push corridor** | 5.0 – 8.0 m | 5 | displacing light boxes placed directly in the lane, or a very tight detour |
-| **climb stack** | 8.0 – 11.0 m | 6 | a genuine multi-mount climb — piles are 2–3 tiers, tops at 0.6–1.3 m, above the single-leg step-up ceiling |
-| dash finish | 11.0 – 12.0 m | 0 | sprint to the line |
+| start apron | 0.0 – 8.0 m | 0 | settle into gait |
+| **mixed field** (scramble + push, interleaved) | 8.0 – 45.0 m | 100 scramble / 60 push | weaving and displacing light boxes, spread across the whole field, not confined to a sub-zone |
+| **climb zone** (second half only) | 24.0 – 45.0 m | 36 | a genuine multi-mount climb — 1–2 tiers per pile (not always two), tops above the single-leg step-up ceiling; boxes up to 30% bigger than the original band |
+| dash finish | 45.0 – 48.0 m | 0 | short sprint to the line |
 
-**20 boxes total, always** — a fixed number split by role (9/5/6), not itself randomised per
-round. What varies round to round is each box's size, density, and placement jitter, drawn from
-the round seed (`env/course.sample_boxes`). See docs/design.md for the packing-fraction math
-behind the room-size-to-box-count ratio, and for the explicit reasoning on why count is fixed
-rather than sampled (short version: sampling count per round would blend policy skill with luck
-of the draw into one noisy number — the same anti-Goodhart argument upstream makes for keeping its
-own course geometry fixed and randomising only friction/wind).
+**196 boxes total, always** — a fixed number split by role (100/60/36, the original 9/5/6 ratio
+scaled with the room), not itself randomised per round. What varies round to round is each box's
+size, density, and placement jitter, drawn from the round seed (`env/course.sample_boxes`), with a
+real no-overlap placement pass (rejection sampling against a shared footprint registry) so boxes
+don't spawn interpenetrating. See docs/design.md for the packing-fraction math behind the
+room-size-to-box-count ratio, and for the explicit reasoning on why count is fixed rather than
+sampled (short version: sampling count per round would blend policy skill with luck of the draw
+into one noisy number — the same anti-Goodhart argument upstream makes for keeping its own course
+geometry fixed and randomising only friction/wind).
 
 Boxes are physical bodies with mass derived from sampled density — pushing and climbing are real
 contact-solver outcomes, not scripted animations.
 
 | Zone | Box side (m) | Height (m) | Density (kg/m³) |
 |---|---|---|---|
-| scramble | 0.28 – 0.85 | 0.22 – 0.60 | 40 – 260 (light clutter) |
-| push | 0.35 – 0.80 | 0.18 – 0.42 | 25 – 90 (deliberately shovable) |
-| climb | 0.45 – 1.00 per tier | 0.26 – 0.46 per tier | 350 – 1400 (stable footing) |
+| scramble | 0.28 – 0.85 | 0.22 – 0.60 | 60 – 390 (light clutter) |
+| push | 0.35 – 0.80 | 0.18 – 0.42 | 37.5 – 135 (deliberately shovable) |
+| climb | 0.675 – 1.95 per tier | 0.39 – 0.897 per tier | 525 – 2100 (stable footing) |
 
 ```bash
 python -m env.course --seed 1     # print one round's box layout
@@ -97,11 +113,13 @@ see", for why that's a deliberate design choice and not a missing feature.
 
 ## Submitting
 
-Interface is byte-for-byte identical to upstream Humanoid Parkour: `obs[104]` + `state_in[256]` →
-`action[12]` + `state_out[256]`, same 15 MB ONNX cap, same recurrent-state contract (feed-forward
-policies simply return zeros for `state_out`). If you have a submission tuned for upstream's
-linear course, it will load here without modification — it almost certainly will not get very
-far, because it has never seen a box.
+Interface is now `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]` (2026-08-18: was
+byte-for-byte identical to upstream Humanoid Parkour at `obs[104]`/`action[12]`; the arm-control
+change above is a deliberate BREAKING change to that parity). Same 15 MB ONNX cap, same
+recurrent-state contract (feed-forward policies simply return zeros for `state_out`). A
+submission tuned for upstream's legs-only course, or for this course's own pre-arms interface,
+will NOT load here — the tensor shapes no longer match and the player's readiness check rejects
+it as a typed submission failure, not a silent truncation.
 
 ## Status
 

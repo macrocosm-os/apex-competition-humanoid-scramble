@@ -50,10 +50,34 @@ def _lit_model(round_seed: int) -> mujoco.MjModel:
     if "<visual>" not in xml:
         xml = xml.replace("<worldbody>", "<visual><global offwidth='1600' offheight='900'/>"
                           "</visual>\n  <worldbody>", 1)
+    # The referee's own floor (env/sim._scene_xml) is an 80 m plane centred at x=30 -- it needs
+    # to extend well past ROOM_LENGTH so a robot that overshoots after "completed" doesn't ray-
+    # miss the floor, but that same slab makes the PREVIEW look like the course keeps going
+    # forever past the finish line (Crux, 2026-08-18: "why is the yellow finish line not at the
+    # end of the course" -- it IS at x=ROOM_LENGTH, the visible floor just doesn't stop there).
+    # Cosmetic fix only: cap the floor a couple metres past the finish line for RENDERING, and
+    # cap it with an actual visible end-cap wall so the course reads as finite on camera. Does
+    # not touch scoring (referee.py / sim.py's floor plane and termination gate are untouched).
+    floor_end = ROOM_LENGTH + 0.4   # small ray-safety margin only -- tight enough that the
+                                     # end-cap wall reads as right behind the finish line, not a
+                                     # separate wall further down the platform (Crux, 2026-08-18:
+                                     # the first cap attempt left too much floor between the
+                                     # yellow line and the wall)
+    xml = re.sub(
+        r'<geom name="floor" type="plane" size="80 20 0.1" pos="30 0 0"([^/]*)/>',
+        f'<geom name="floor" type="plane" size="{floor_end / 2:.2f} {TRACK_HALF_W + 1:.2f} 0.1" '
+        f'pos="{floor_end / 2:.2f} 0 0"\\1/>',
+        xml, count=1,
+    )
     xml = xml.replace("<worldbody>",
         '<worldbody>\n'
         '    <light pos="8 -6 9" dir="-0.3 0.4 -1" directional="true" diffuse="0.6 0.6 0.57"/>\n'
         '    <light pos="34 6 9" dir="0.2 -0.4 -1" directional="true" diffuse="0.35 0.36 0.40"/>\n'
+        # End-cap wall just past the finish line so the platform visibly terminates on camera,
+        # instead of fading into open black background -- makes "this is the end" legible from
+        # any camera angle, not just ones that happen to frame the yellow line clearly.
+        f'    <geom type="box" pos="{floor_end:.2f} 0 {PLINTH_TOP:.2f}" '
+        f'size="0.05 {TRACK_HALF_W + 1:.2f} {PLINTH_TOP:.2f}" group="2" rgba=".30 .32 .35 1"/>\n'
         f'    <geom type="box" pos="{ROOM_LENGTH:.2f} 0 {PLINTH_TOP + 0.9:.2f}" '
         f'size="0.04 {TRACK_HALF_W:.2f} 0.02" group="2" rgba="1 .95 .2 1"/>', 1)
     return mujoco.MjModel.from_xml_string(xml, _mesh_assets())

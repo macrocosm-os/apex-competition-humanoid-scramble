@@ -5,10 +5,15 @@ validates the interface, and serves /health /reset /act. There is no miner code 
 the artifact is a pure ONNX graph (spec `artifact_type: onnx`), so validation is structural.
 
 Contract the submission must satisfy (also in the miner README):
-    inputs   obs       float32 [batch, 104]
+    inputs   obs       float32 [batch, 136]
              state_in  float32 [batch, 256]
-    outputs  action    float32 [batch, 12]
+    outputs  action    float32 [batch, 22]
              state_out float32 [batch, 256]
+
+2026-08-18: OBS_DIM 104->136 and ACT_DIM 12->22 (arms added to the robot -- see env/sim.py's
+module docstring for the full rationale). This is a BREAKING interface change: any submission
+built against the old 12-DoF/104-obs contract will fail the shape check below and be rejected as
+a typed submission failure, not silently truncated/padded -- deliberate, not a bug.
 
 `state_in`/`state_out` are the policy's own per-episode memory, opaque to us: this server zeroes
 it on /reset and feeds each step's `state_out` back in as the next step's `state_in`. Friction
@@ -40,8 +45,8 @@ from gym_v1 import Player, serve
 # Overridable so miners (and tools/local_eval.py) can serve a local file; in the sandbox the
 # platform always writes to the spec's target_path.
 SUBMISSION_PATH = os.environ.get("SUBMISSION_PATH", "/app/submission.onnx")
-OBS_DIM = 104
-ACT_DIM = 12
+OBS_DIM = 136   # was 104 -- see env/sim.py, arms added 2026-08-18
+ACT_DIM = 22    # was 12
 STATE_DIM = 256
 
 API_LOG = os.environ.get("APEX_API_LOG", "1") != "0"

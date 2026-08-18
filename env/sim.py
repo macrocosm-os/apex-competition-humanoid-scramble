@@ -6,39 +6,24 @@ the scene itself: instead of a fixed sequence of named maneuvers, the robot cros
 room scattered with a per-round-sampled field of loose boxes (env/course.py) that are free bodies,
 not welded geoms — pushing and climbing are genuine contact-solver outcomes.
 
-Robot: Unitree G1, 12 actuated leg DoF (`env/assets/g1_12dof.xml`, vendored from unitree_rl_gym,
-BSD-3). The upper body is real mass and real collision geometry welded to the pelvis — the arms
-are there and they hit things, they just are not actuated (see docs/design.md, "Robot: G1 12-DoF,
-and why not 29" for why this is a one-way door). Torque actuators driven by a PD loop in `step`,
-so the ACTION IS A JOINT POSITION TARGET, not a torque.
+Robot: Unitree G1, 22 actuated DoF (`env/assets/g1_22dof.xml`) -- 12 leg joints (unchanged from
+the original fork) plus 10 arm joints (5 per arm: shoulder pitch/roll/yaw, elbow, wrist roll).
 
-Deterministic by construction: same (round seed, instance seed, action sequence) -> same
-trajectory. The referee owns the physics; the player only ever sees the observation vector.
-
-Observation (float32, OBS_DIM = 104), all in the robot's yaw frame unless noted:
-    [0:3]     projected gravity                        (which way is down, from the body)
-    [3:6]     base angular velocity      * 0.25
-    [6:9]     base linear velocity       * 2.0
-    [9:21]    joint angles - default pose
-    [21:33]   joint velocities           * 0.05
-    [33:45]   previous action
-    [45:47]   gait clock, sin/cos of a 0.8 s cycle
-    [47:49]   heading error, sin/cos of yaw (room runs along +x)
-    [49]      lateral offset y
-    [50]      distance to the finish line / 10
-    [51]      pelvis height above the surface directly below
-    [52:97]   height scan, 9 x 5 grid, surface height relative to the pelvis
-    [97:104]  overhead clearance, 7 samples ahead
-
-The height scan hits WHATEVER is directly below each ray -- floor or a box top, whichever is
-higher, exactly like a real height-map sensor. There is no separate "box" channel: a stack reads
-as a tall floor. This is the fork's one perceptual difference worth stating plainly, because it
-is also the one deliberate simplification -- see docs/design.md, "What the policy can and cannot
-see" for why an unlabelled height field is enough to express dash/scramble/push/climb and does
-not leak which zone is which.
-
-Action (float32, ACT_DIM = 12): joint position targets as offsets from the default pose,
-scaled by ACTION_SCALE and clipped to the joint limits.
+2026-08-18 (Crux): swapped from the legs-only 12-DoF variant to this 22-DoF one specifically
+because this course involves pushing, lifting, and climbing -- a legs-only robot could only
+body-check boxes and mount climb stacks leg-first; full arm control lets a policy actually grasp,
+brace, and shove with its hands, which the brief calls for explicitly. This reverses what the
+fork's original design doc called a deliberate "one-way door" (see docs/design.md's audit trail,
+kept as historical record, not deleted) -- the interface, PD gains, and default pose below are
+all new to reflect the arm joints; ACT_DIM/OBS_DIM changed accordingly (see below), which means
+any submission built against the old 12-DoF/104-obs interface will NOT load against this course
+without retraining -- an explicit, accepted breaking change per this request, not an oversight.
+Arm joint specs (ranges, actuatorfrcrange, masses/inertias) are taken directly from Unitree's own
+published 29-DoF G1 MJCF (unitreerobotics/unitree_rl_gym), not invented -- with one adaptation:
+this repo only vendors a combined wrist_roll_rubber_hand mesh (no separate wrist_pitch/wrist_yaw
+meshes), so the wrist is 1-DoF (roll) rather than the reference's 3-DoF wrist. Waist joints from
+the reference were also NOT added: this repo's torso mesh is the fused single-body variant with
+no separate waist link to hang a joint from.
 
 The box field (sizes, densities, positions) is drawn once per ROUND from the round seed and is
 IDENTICAL for every instance in that round; the box field is also NOT itself observable as
@@ -67,7 +52,12 @@ from .course import (BOX_PREFIX, N_BOXES, PLINTH_TOP, ROOM_LENGTH, TRACK_HALF_W,
 
 ASSETS = pathlib.Path(__file__).parent / "assets"
 
-ACT_DIM = 12
+# 2026-08-18: 12 (legs only) -> 22 (12 legs + 10 arms: shoulder pitch/roll/yaw, elbow, wrist roll,
+# x2 sides). See env/assets/g1_22dof.xml and the module docstring above for the full rationale
+# and what was and wasn't carried over from Unitree's reference 29-DoF model.
+ACT_DIM = 22
+N_LEG_DOF = 12
+N_ARM_DOF = 10
 
 # Opaque per-episode policy memory, threaded by the player between /act calls and zeroed on
 # /reset. Recurrence matters here for the same reason it did upstream (wind is unobservable), and
@@ -78,7 +68,13 @@ STATE_DIM = 256
 
 SCAN_NX, SCAN_NY = 9, 5          # height-scan grid, 45 rays
 OVERHEAD_N = 7
-OBS_DIM = 52 + SCAN_NX * SCAN_NY + OVERHEAD_N   # = 104
+N_HAND_RAYS = 2                  # one proximity ray per hand, see _obs
+HAND_RAY_RANGE = 1.0              # metres; hands don't need the long reach the height scan does
+# Base channels grew from 52 -> 62 (2026-08-18, arms added): grav(3) + ang(3) + lin(3) +
+# joint_angles(22, was 12) + joint_vel(22, was 12) + action(22, was 12) + gait(2) + heading(2) +
+# [y, dist_to_finish, pelvis_height](3) = 3+3+3+22+22+22+2+2+3 = 82, then + scan(45) + over(7) +
+# hand_dist(2) = 82 + 45 + 7 + 2 = 136.
+OBS_DIM = 82 + SCAN_NX * SCAN_NY + OVERHEAD_N + N_HAND_RAYS   # = 136 (was 104)
 
 # Where the scan looks, in metres in the robot's yaw frame. Backwards a little so the policy can
 # see the edge it is standing on, forwards far enough to plan a mount onto a box or stack.
@@ -100,11 +96,44 @@ UPRIGHT_MIN = 0.40               # projected-gravity z; ~66 deg of tilt
 RAY_FROM_ABOVE = 4.0             # raised from parkour's 3.0 m: must clear the tallest possible
                                   # climb stack (~1.3 m) plus the pelvis's own standing height
 
-# Unitree's PD gains and home pose for this robot (deploy/deploy_mujoco/configs/g1.yaml).
-KP = np.array([100, 100, 100, 150, 40, 40, 100, 100, 100, 150, 40, 40], np.float64)
-KD = np.array([2, 2, 2, 4, 2, 2, 2, 2, 2, 4, 2, 2], np.float64)
+# PD gains and home pose. Leg entries unchanged from Unitree's own tuning
+# (deploy/deploy_mujoco/configs/g1.yaml). Arm gains are NEW (2026-08-18, arm actuation added) --
+# not from a Unitree deploy config (their published tuning targets torque control for
+# manipulation tasks, not a PD position-target loop matching this course's leg convention), so
+# these are reasoned from the arm actuatorfrcrange values in env/assets/g1_22dof.xml (25 N.m for
+# shoulder/elbow/wrist-roll) scaled down from the leg gains in proportion to each joint's own
+# force limit -- e.g. shoulder KP ~= leg hip KP * (25/88) -- rather than reusing leg-scale gains
+# outright, which would be too stiff for the arms' much lower torque budget and PD-oscillate.
+# FLAGGED AS UNVALIDATED: unlike the legs (Unitree-measured), these have not been tuned against
+# a real trained policy attempting to push/lift/climb -- see docs/design.md "Open" list, which
+# already carries an equivalent flag for the push/climb box bands; arm PD gains are the same
+# category of gap and should be added there.
+#
+# Joint order (must match env/assets/g1_22dof.xml's <actuator> block exactly):
+#   [0:12]  legs: L hip pitch/roll/yaw, knee, ankle pitch/roll, R hip pitch/roll/yaw, knee,
+#           ankle pitch/roll (unchanged order/values from the original 12-DoF fork)
+#   [12:17] left arm: shoulder pitch/roll/yaw, elbow, wrist roll
+#   [17:22] right arm: shoulder pitch/roll/yaw, elbow, wrist roll
+KP = np.array([100, 100, 100, 150, 40, 40, 100, 100, 100, 150, 40, 40,
+               30, 30, 25, 25, 15, 30, 30, 25, 25, 15], np.float64)
+KD = np.array([2, 2, 2, 4, 2, 2, 2, 2, 2, 4, 2, 2,
+               1.0, 1.0, 0.8, 0.8, 0.4, 1.0, 1.0, 0.8, 0.8, 0.4], np.float64)
+# Default pose: legs unchanged. Arm defaults (2026-08-18): all-zero shoulder/wrist, tiny elbow
+# bend (0.15 rad). COSMETIC CAVEAT, flagged honestly rather than over-polished: at all-zero
+# angles the mesh's own rest geometry already hangs each arm down (~0.2 m shoulder-to-wrist
+# drop) with a modest forward offset (~0.12 m) baked into the STL/body-frame geometry itself --
+# visually this reads as a relaxed-but-not-ramrod-straight stance, not a full "hanging dead at
+# the sides" pose, and no small change to these 5 default angles fully removes that forward
+# offset (it comes from the mesh's own rest orientation, not the joint angles). Functionally this
+# does not matter: DEFAULT_ANGLES only sets step 0's target pose, and the PD loop immediately
+# starts tracking whatever the policy commands from the very first control step -- a policy is
+# free to drive the arms to any pose the joint ranges allow starting immediately, this default is
+# not a constraint on behaviour. Revisit only if visual polish on the idle/reset pose specifically
+# matters for a future render/demo.
 DEFAULT_ANGLES = np.array([-0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
-                           -0.1, 0.0, 0.0, 0.3, -0.2, 0.0], np.float64)
+                           -0.1, 0.0, 0.0, 0.3, -0.2, 0.0,
+                           0.0, 0.0, 0.0, 0.15, 0.0,
+                           0.0, 0.0, 0.0, 0.15, 0.0], np.float64)
 
 START_X = -0.8
 GAIT_PERIOD = 0.8
@@ -170,7 +199,7 @@ def instance_spec(i: int, n: int, seed: int,
 
 def _scene_xml(floor_frag: str, boxes_frag: str) -> str:
     """The robot model with the room's floor and box field spliced into its worldbody."""
-    robot = (ASSETS / "g1_12dof.xml").read_text()
+    robot = (ASSETS / "g1_22dof.xml").read_text()
     wall = (f'    <geom name="floor" type="plane" size="80 20 0.1" pos="30 0 0" '
             f'condim="3" group="{WORLD_GROUP}" rgba=".18 .19 .22 1"/>\n')
     start = (f'    <geom type="box" pos="{START_X - 0.7:.3f} 0 {PLINTH_TOP - 0.2:.3f}" '
@@ -237,7 +266,7 @@ class ParkourSim:
         rng = np.random.default_rng([self._seed, 0xBADA55])
         self.data.qpos[0] = START_X
         self.data.qpos[2] = PLINTH_TOP + 0.793
-        self.data.qpos[7:19] = DEFAULT_ANGLES
+        self.data.qpos[7:29] = DEFAULT_ANGLES   # 22 actuated DoF now (was 12 -- legs only)
         # Robot qpos is [0:19] (free joint 7 + 12 leg angles); box free joints follow at [19:].
         # mj_resetData already sets every box to its compiled resting pose (qpos0), so nothing
         # box-related needs setting here -- only the robot's own noise is added, and only over
@@ -260,7 +289,7 @@ class ParkourSim:
         self._action = np.clip(a, -10.0, 10.0)
         target = self._action * ACTION_SCALE + DEFAULT_ANGLES
         for _ in range(FRAME_SKIP):
-            self.data.ctrl[:] = (target - self.data.qpos[7:19]) * KP - self.data.qvel[6:18] * KD
+            self.data.ctrl[:] = (target - self.data.qpos[7:29]) * KP - self.data.qvel[6:28] * KD
             mujoco.mj_step(self.model, self.data)
         self.steps += 1
         self.max_x = max(self.max_x, float(self.data.qpos[0]))
@@ -316,19 +345,54 @@ class ParkourSim:
         ground = self._ray_down(px, py, pz + RAY_FROM_ABOVE)
         phase = (self.steps * PHYS_DT * FRAME_SKIP % GAIT_PERIOD) / GAIT_PERIOD
 
+        # Arm proprioception (2026-08-18, added alongside arm actuation): joint angles/velocities
+        # for all 22 actuated DoF now (was 12), so the policy can feel where its hands/elbows are,
+        # not just its legs -- without this the arms would be fully actuatable but flying blind.
+        arm_leg_angles = d.qpos[7:29] - DEFAULT_ANGLES        # 22 values (12 leg + 10 arm)
+        arm_leg_vel = d.qvel[6:28] * 0.05                      # 22 values
+
+        # Hand-proximity channels (2026-08-18, added alongside arm actuation): the height scan
+        # tells a policy what the TERRAIN looks like, but pushing/lifting needs to know what's
+        # within actual reach of each HAND -- "is there a box close enough to my hand to contact
+        # right now" is a different question from "what does the floor look like ahead of my
+        # feet", and the old height-scan-only observation had no channel for it. Implemented as
+        # one ray per hand, cast forward from each wrist body along the robot's own forward axis,
+        # returning plain distance to the nearest surface (box or floor) -- a continuous distance
+        # value, not a labelled "box present" bit, for the same reason the height scan itself is
+        # unlabelled (docs/design.md, "What the policy can and cannot see"): a policy should
+        # perceive proximity and decide what to do about it, not read a flag saying what's there.
+        hand_dist = np.array([
+            self._ray_forward(self.model.body("left_wrist_roll_link").id, HAND_RAY_RANGE),
+            self._ray_forward(self.model.body("right_wrist_roll_link").id, HAND_RAY_RANGE),
+        ])
+
         return np.concatenate([
             grav,
             ang * 0.25,
             lin * 2.0,
-            d.qpos[7:19] - DEFAULT_ANGLES,
-            d.qvel[6:18] * 0.05,
+            arm_leg_angles,
+            arm_leg_vel,
             self._action,
             [np.sin(2 * np.pi * phase), np.cos(2 * np.pi * phase)],
             [np.sin(yaw), np.cos(yaw)],
             [py, (ROOM_LENGTH - px) / 10.0, np.clip(pz - ground, -SCAN_CLIP, SCAN_CLIP)],
             scan,
             over,
+            hand_dist,
         ]).astype(np.float32)
+
+    def _ray_forward(self, body_id: int, max_range: float) -> float:
+        """Distance from `body_id`'s current position, along the ROBOT's forward (yaw) direction
+        (not the hand's own possibly-rotated frame -- keeps this simple and stable regardless of
+        wrist roll angle), to the nearest box/floor surface, clipped to `max_range`. Used for the
+        per-hand proximity channels; see _obs above for why this exists and what it deliberately
+        does not tell the policy (no box-identity/zone label, only a raw distance)."""
+        origin = np.array(self.data.xpos[body_id])
+        yaw = self._yaw()
+        direction = np.array([np.cos(yaw), np.sin(yaw), 0.0])
+        d = mujoco.mj_ray(self.model, self.data, origin, direction, self._ray_mask, 1, -1,
+                          self._geomid)
+        return max_range if d < 0 else float(min(d, max_range))
 
     # -- gates -----------------------------------------------------------------------------
 

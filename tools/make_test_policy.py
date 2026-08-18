@@ -6,12 +6,16 @@ not for player_error or invalid_action. Release CI gates on that.
 
 It is also the reference for what a conforming graph looks like:
 
-    inputs   obs       float32 [batch, 104]
+    inputs   obs       float32 [batch, 136]
              state_in  float32 [batch, 256]
-    outputs  action    float32 [batch, 12]
+    outputs  action    float32 [batch, 22]
              state_out float32 [batch, 256]
 
     python tools/make_test_policy.py --out /tmp/test_policy.onnx
+
+2026-08-18: dims read live from env.sim (OBS_DIM/ACT_DIM below), so this file did not need
+editing when the robot gained arms -- flagging inline anyway since the docstring's literal
+numbers above are a copy for humans reading this file standalone and would otherwise go stale.
 """
 
 from __future__ import annotations
