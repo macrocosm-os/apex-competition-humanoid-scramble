@@ -1,7 +1,8 @@
-<!-- render stills with `python tools/preview.py` and drop the overview image link here, mirroring
-     upstream humanoid-parkour's README -->
-
 # Box Scramble
+
+![Box Scramble course preview: Unitree G1 humanoid facing a 48m x 6m room scattered with yellow/orange light clutter, blue shovable crates, and red heavy box stacks](renders_team_share/scene_seed495117.png)
+
+*Course render (seed 495117) — robot at the start, box density and difficulty increasing toward the far end.*
 
 An Apex competition (Bittensor Subnet 1). Fork of
 [Humanoid Parkour](https://github.com/macrocosm-os/apex-competition-humanoid-parkour). Miners
