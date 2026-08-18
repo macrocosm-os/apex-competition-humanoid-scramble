@@ -316,6 +316,75 @@ def _slab(x0, length, top, color, half_w=TRACK_HALF_W):
     return (x0 + length / 2, 0.0, top - PLINTH_THICK / 2, length / 2, half_w, PLINTH_THICK / 2, color)
 
 
+# ---------------------------------------------------------------------------------------------
+# ELEVATED FINISH + DUAL LEAP/STACK STRATEGY (2026-08-18, Amy: "make the finish line elevated so
+# miners are forced to climb and/or stack blocks to complete the course"; Crux, refining: keep
+# BOTH strategies open and roughly reward-equivalent -- "leaping from big box to big box is
+# actually roughly equivalent to stacking in terms of expected reward" -- rather than picking one
+# canonical solution.)
+#
+# Why this closes a real gap, not just adds height: today a policy can complete the course by
+# staying on the floor the entire crossing (weave/push through the mixed field, dash the last
+# 3 m) -- climbing is optional, used only where it happens to be the fastest route through a
+# climb-zone pile. Raising the finish slab's walking surface FINISH_RISE above the main floor
+# means x >= ROOM_LENGTH alone no longer completes the course (see env/sim.py's height-gated
+# `_terminal`): a robot MUST gain height before the finish line counts, for the first time making
+# climb/leap a mandatory, not optional, skill.
+#
+# FINISH_RISE = 1.6 m. Sized against the EXISTING climb-stack ceiling, not a new number invented
+# in isolation: a 2-tier stack (CLIMB_MAX_TIERS=2) tops out at roughly CLIMB_HEIGHT's median x2
+# (~1.0 m) to its max-draw x2 (~1.79 m, both tiers drawing near CLIMB_HEIGHT's upper bound at
+# once, which is rare). 1.6 m sits inside that band, above a TYPICAL 2-tier stack but reachable by
+# a deliberately-built one -- so "stack two boxes exactly at the platform edge" is a real, viable
+# solution (not an impossible ask) rather than either a freebie (if set too low, any 2-tier climb
+# stack would already clear it) or an unreachable wall (if set at or above the lognormal max).
+# This is the same sizing PRINCIPLE docs/design.md already uses for climb-tier heights ("set
+# explicitly ABOVE the previous mechanic's ceiling so the new one can't be trivially skipped"),
+# applied one level up.
+FINISH_RISE = 1.6
+
+# LEAP-CHAIN boxes (Crux's dual-strategy ask): a short, sparse row of narrow, extra-tall
+# "waypoint" boxes positioned in the dash zone immediately before the finish platform, offered as
+# an explicit SECOND route up -- leap box-to-box to the platform edge, instead of stacking your
+# own climb pile from field material. Deliberately narrow (LEAP_SIDE, half the median climb box's
+# footprint) so they read as stepping stones, not a stackable base of their own -- the intent is
+# two DISTINCT strategies (leap the chain, or build a stack), not "stack onto a leap box".
+#
+# Height (LEAP_TOP) is set just under FINISH_RISE so the last hop from the final waypoint box onto
+# the platform is a short, natural step-up rather than another full mount -- the leap chain's own
+# difficulty is entirely in the HORIZONTAL gaps between boxes, not one final climb at the end (that
+# would just be stacking again with extra steps). Gaps (LEAP_GAP) are set inside a standing broad
+# jump's plausible range for a ~32 kg legs+arms G1 at walking-to-running momentum -- committing,
+# not free, but not physically absurd either. Neither LEAP_TOP nor LEAP_GAP has been validated
+# against a real trained policy (same open-gap category as the push/climb band sizing in
+# docs/design.md) -- flagged there, not silently assumed correct.
+LEAP_COUNT = 3                 # 3 stepping-stone boxes between dash-zone floor and the platform
+LEAP_SIDE = (0.42, 0.06, 0.55)  # half-extent x/y: narrow enough to read as a stepping stone,
+                                 # not a stacking base (about half CLIMB_SIDE's median footprint)
+LEAP_TOP = FINISH_RISE - 0.25    # 1.35 m: below platform height so the final hop is a step-up,
+                                  # not another full mount
+LEAP_GAP = 1.05                  # metres between consecutive waypoint-box faces (edge to edge,
+                                  # not centre to centre) -- a committed but plausible standing gap
+
+
+def _leap_chain_boxes() -> list[Box]:
+    """Fixed (not per-round-sampled) row of LEAP_COUNT tall narrow boxes spanning the dash zone,
+    ending at the finish platform's near edge. Fixed rather than randomised like the rest of the
+    field deliberately: this is a SIGNPOSTED alternate route (Crux's "leap from box to box"), not
+    another randomised obstacle -- a miner choosing the leap strategy needs to be able to learn a
+    stable, repeatable skill ("there is always a leap chain here, at this spacing") the same way
+    upstream's fixed on-ramp/hurdle geometry is learnable, rather than a novel random draw every
+    round. Only the box field (scramble/push/climb) stays round-randomised; the leap chain and
+    the dash/finish geometry are both course-version constants."""
+    boxes = []
+    hx, hy, hz = LEAP_SIDE
+    x = APRON_LEN + FIELD_LEN + DASH_LEN - LEAP_COUNT * (2 * hx + LEAP_GAP)
+    for i in range(LEAP_COUNT):
+        cx = x + i * (2 * hx + LEAP_GAP) + hx
+        boxes.append(Box("climb", cx, 0.0, PLINTH_TOP + hz, hx, hy, hz, float(np.mean(DENSITY_CLIMB))))
+    return boxes
+
+
 def build_floor() -> list[Seg]:
     """The room's static floor: one slab across the full width for the whole 12 m length, plus
     the start ramp-on apron. A single flat plinth top (no stairs, no ramps) is deliberate -- this
@@ -332,6 +401,12 @@ def build_floor() -> list[Seg]:
     didn't read as being at the end of the visible course (Crux, 2026-08-18) -- the floor really
     was 5 m longer than the scored room. Use FIELD_LEN directly: it is the one authoritative
     field-length constant now (see the zone-extents block above), not a sum of the per-role bands.
+
+    ELEVATED FINISH (2026-08-18): the dash slab is now split into the dash APPROACH (unchanged
+    height, PLINTH_TOP) and the FINISH PLATFORM at the very end (raised FINISH_RISE above
+    PLINTH_TOP) -- see the ELEVATED FINISH block above for why. The platform is a short slab
+    (PLATFORM_LEN) right at ROOM_LENGTH so there is a real, walkable top surface to stand on once
+    a robot gains the height, not just a mathematical threshold in space.
     """
     segs = []
     segs.append(Seg("apron", APRON_LEN, [_slab(0.0, APRON_LEN, PLINTH_TOP, "apron")]))
@@ -342,8 +417,18 @@ def build_floor() -> list[Seg]:
     # 2026-08-18 interleaving change, so summing them here would double/triple-count and push the
     # dash slab (and therefore the finish line) past ROOM_LENGTH again, the exact bug already
     # fixed once above; use the same APRON_LEN + FIELD_LEN this function already computed with.
-    segs.append(Seg("dash", DASH_LEN,
-                    [_slab(APRON_LEN + FIELD_LEN, DASH_LEN, PLINTH_TOP, "dash")]))
+    #
+    # ELEVATED FINISH split: PLATFORM_LEN (last 1.0 m of the old dash slab) is now raised by
+    # FINISH_RISE; the remaining dash run stays at floor height so there is still a genuine
+    # run-up before the mandatory height gain, not an immediate wall right at the mixed field's
+    # edge.
+    platform_len = 1.0
+    dash_floor_len = DASH_LEN - platform_len
+    segs.append(Seg("dash", dash_floor_len,
+                    [_slab(APRON_LEN + FIELD_LEN, dash_floor_len, PLINTH_TOP, "dash")]))
+    segs.append(Seg("finish_platform", platform_len,
+                    [_slab(APRON_LEN + FIELD_LEN + dash_floor_len, platform_len,
+                           PLINTH_TOP + FINISH_RISE, "dash")]))
     return segs
 
 
@@ -636,7 +721,11 @@ def sample_boxes(rng: np.random.Generator) -> list[Box]:
     climb = _sample_climb_boxes(rng, placed)
     push = _sample_push_boxes(rng, placed)
     scramble = _sample_scramble_boxes(rng, placed)
-    return climb + push + scramble
+    # Leap chain (2026-08-18): fixed, not round-sampled -- see _leap_chain_boxes' docstring for
+    # why. Appended last and NOT run through the overlap registry: it lives in the dash zone
+    # (APRON_LEN + FIELD_LEN and beyond), which no other zone's sampling band reaches, so there is
+    # no possible overlap with the round-sampled field.
+    return climb + push + scramble + _leap_chain_boxes()
 
 
 def build_course(rng: np.random.Generator):

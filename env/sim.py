@@ -32,11 +32,24 @@ and push/climb rather than read a manifest. Per-instance wind still varies, same
 env/course.sample_boxes and `RoundScene` below.
 
 Termination gates (each maps to a terminal_reason the miner sees post-round):
-    completed       pelvis past the far wall (x >= ROOM_LENGTH)
+    completed       pelvis past the far wall AND at/above the elevated finish platform (x >=
+                    ROOM_LENGTH and z >= PLINTH_TOP + FINISH_RISE - FINISH_HEIGHT_TOL) -- see
+                    "ELEVATED FINISH" below
     fell            pelvis under FALL_CLEARANCE above the surface below it, or torso past ~66 deg
     out_of_bounds   |y| > TRACK_HALF_W (no walking around the room through a wall)
     physics_glitch  NaN/Inf state or |qvel| > 100 (glitch-surfing scores 0)
     timeout         max_steps control steps elapsed
+
+ELEVATED FINISH (2026-08-18, Amy/Crux): completion used to be x-position only, which meant a
+robot that never left the floor (weaving/pushing across the mixed field on flat ground, dashing
+the last stretch) could complete the course without ever climbing anything -- climb was always
+optional, just sometimes the fastest route. The finish platform (env/course.py's FINISH_RISE) is
+now FINISH_RISE above the main floor, and `_terminal` requires the pelvis to have reached that
+height, not just the far wall's x-coordinate -- so gaining height (via a self-built stack OR the
+fixed leap chain, see env/course.py) is mandatory to finish at all, not just faster. Progress
+scoring (env/scoring.py) is unaffected -- `progress` is still pure x-fraction-of-room-crossed for
+non-completing instances, so a robot that reaches x=ROOM_LENGTH but never gains height still
+scores close to 1.0 via progress, just short of the >1.0 completion bonus.
 """
 
 from __future__ import annotations
@@ -47,8 +60,14 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .course import (BOX_PREFIX, N_BOXES, PLINTH_TOP, ROOM_LENGTH, TRACK_HALF_W, WORLD_GROUP,
-                     boxes_xml_fragment, build_course, floor_xml_fragment)
+from .course import (BOX_PREFIX, FINISH_RISE, N_BOXES, PLINTH_TOP, ROOM_LENGTH, TRACK_HALF_W,
+                     WORLD_GROUP, boxes_xml_fragment, build_course, floor_xml_fragment)
+
+# Vertical tolerance on the elevated-finish height gate (2026-08-18) -- a small margin below the
+# platform's true top so a pelvis that has genuinely mounted the platform (but is mid-stride, not
+# perfectly settled) still registers as completed, without being loose enough that standing on a
+# tall single climb box short of the platform would falsely pass.
+FINISH_HEIGHT_TOL = 0.15
 
 ASSETS = pathlib.Path(__file__).parent / "assets"
 
@@ -402,7 +421,7 @@ class ParkourSim:
             return "physics_glitch"
         if np.max(np.abs(qvel)) > QVEL_GLITCH_LIMIT:
             return "physics_glitch"
-        if qpos[0] >= ROOM_LENGTH:
+        if qpos[0] >= ROOM_LENGTH and qpos[2] >= PLINTH_TOP + FINISH_RISE - FINISH_HEIGHT_TOL:
             return "completed"
         if abs(qpos[1]) > TRACK_HALF_W:
             return "out_of_bounds"

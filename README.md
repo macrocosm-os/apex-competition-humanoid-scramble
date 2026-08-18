@@ -17,7 +17,8 @@ shovable crates, and stacks of heavy boxes too tall to step onto directly.
 | submission | ONNX graph, ≤ 15 MB, architecture free (same interface as upstream) |
 | interface | `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]`, float32 (was `obs[104]`/`action[12]` — BREAKING change, 2026-08-18) |
 | evaluation | 24 instances (inherited from upstream, **not yet re-measured for this course** — see docs/design.md), ≤ 3000 control steps each, box field + wind drawn per round |
-| baseline | **not yet built** — see docs/design.md, "Open" |
+| baseline | 0.675 raw score, 32/48 m crossed, full-arm-control policy (Amy, 2026-08-18) — **predates the elevated finish below**, see "Open" |
+| finish | **elevated 1.6 m above the main floor (2026-08-18)** — climbing or leaping is now mandatory to complete the course, not optional |
 
 ## The robot has full arm control (2026-08-18)
 
@@ -51,7 +52,8 @@ docs/design.md for why the room is no longer 2:1). West to east:
 | start apron | 0.0 – 8.0 m | 0 | settle into gait |
 | **mixed field** (scramble + push, interleaved) | 8.0 – 45.0 m | 100 scramble / 60 push | weaving and displacing light boxes, spread across the whole field, not confined to a sub-zone |
 | **climb zone** (second half only) | 24.0 – 45.0 m | 36 | a genuine multi-mount climb — 1–2 tiers per pile (not always two), tops above the single-leg step-up ceiling; boxes up to 30% bigger than the original band |
-| dash finish | 45.0 – 48.0 m | 0 | short sprint to the line |
+| dash approach | 45.0 – 47.0 m | 0 (+ 3 fixed leap-chain boxes near the end) | short sprint, then choose your route up |
+| **finish platform** | 47.0 – 48.0 m | — | raised **1.6 m** above the main floor — completion now requires height, not just reaching x = 48 m |
 
 **196 boxes total, always** — a fixed number split by role (100/60/36, the original 9/5/6 ratio
 scaled with the room), not itself randomised per round. What varies round to round is each box's

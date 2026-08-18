@@ -190,6 +190,63 @@ did (docs/design.md "The scene is compiled once, not per instance" is the templa
 this), and adjust `max_steps_per_episode` / `num_instances` / timeouts to fit, exactly as upstream's
 own 15 MB / 3000-step sizing exercise did for submission size against inference cost.
 
+## Elevated finish + dual leap/stack strategy (2026-08-18)
+
+**The gap this closes.** Before this change, completion was pure x-position (`qpos[0] >= ROOM_LENGTH`
+in env/sim.py). A policy that stayed on the floor the entire crossing -- weaving/pushing through
+the mixed field, dashing the last stretch -- could complete the course (score > 1.0) without ever
+climbing anything. Climb was always optional, sometimes the fastest route through a climb-zone
+pile, never REQUIRED. Amy's baseline (0.675 raw score, 32/48 m crossed with the full-arm-control
+policy) demonstrated this empirically -- a strong crossing result with no climbing forced.
+
+**The fix, and why this height.** The finish platform (last 1.0 m of the room, at the far wall)
+is raised `FINISH_RISE = 1.6 m` above the main floor (env/course.py), and `_terminal` in
+env/sim.py now requires BOTH `x >= ROOM_LENGTH` AND pelvis height at/above the platform (with a
+small `FINISH_HEIGHT_TOL` margin for mid-stride pelvis bob). 1.6 m is sized against the EXISTING
+climb-stack ceiling, not invented in isolation: a 2-tier stack (`CLIMB_MAX_TIERS=2`) typically
+tops out around 1.0 m (median tier height x2) with a rare max-draw ceiling near 1.79 m (both
+tiers drawing near `CLIMB_HEIGHT`'s upper bound at once). 1.6 m sits inside that band -- above a
+TYPICAL 2-tier stack, reachable by a deliberately-built one -- so "stack two boxes right at the
+platform edge" is a real, viable solution, not an impossible ask. Same sizing PRINCIPLE this
+doc already uses for climb-tier heights ("set explicitly above the previous mechanic's ceiling so
+it can't be trivially skipped"), applied one level up.
+
+**Why a second route (the leap chain), not just a taller wall.** Raised directly by Crux, pushing
+back on a single-solution elevated finish: *"let's keep strategies open - whether miners want to
+stack or leap is their choice"* and *"leaping from big box to big box is actually roughly
+equivalent to stacking in terms of expected reward"*. A single mandatory mechanic (build-a-stack
+only) would have been a narrower ask than what was actually wanted: genuine solution VARIETY, not
+just a harder gate. `_leap_chain_boxes()` adds `LEAP_COUNT=3` narrow, tall waypoint boxes
+(`LEAP_SIDE`, about half a climb box's median footprint -- deliberately too narrow to serve as a
+stacking base of their own, so this reads as a distinct second strategy rather than "stack onto a
+leap box") spanning the dash zone up to the platform's edge, at `LEAP_TOP = FINISH_RISE - 0.25`
+(1.35 m -- just under platform height, so the final hop onto the platform is a short step, not
+another full mount) with `LEAP_GAP = 1.05 m` between consecutive boxes (a committed but plausible
+standing-jump gap for a ~32 kg legs+arms G1).
+
+**Fixed, not round-sampled, and why.** Unlike the rest of the box field, the leap chain is a
+COURSE-VERSION CONSTANT (same category as room geometry/zone lengths), not drawn from the round
+seed. A miner choosing the leap strategy needs a stable, learnable skill ("there is always a leap
+chain here, at this spacing") the same way upstream's fixed on-ramp/hurdle geometry is learnable
+-- randomising it every round would conflate "can this policy leap" with "did it get a favourable
+draw", the same anti-Goodhart argument this doc already makes for keeping box COUNT fixed (see
+"Box count" above). Only the round-sampled field (scramble/push/climb) stays randomised.
+
+**What "roughly reward-equivalent" required, and what's still unvalidated.** True equivalence
+between the two strategies is a tuning problem, not a one-shot number: leaping is a higher-variance
+athletic skill (timing, momentum, landing stability) against a lower-variance, more mechanical
+build-a-stack path. `LEAP_TOP`/`LEAP_GAP` are reasoned from physical plausibility only -- **not**
+validated against a real trained policy attempting either route, the same category of gap this
+doc already flags for the push/climb density bands. Required before calling this tuned: drive a
+policy (Amy's baseline, retrained against the new completion gate, is the natural next data point)
+at both strategies and check neither dominates by a wide margin; adjust `LEAP_GAP`/`LEAP_TOP` or
+`FINISH_RISE` if one path is trivially preferred.
+
+**Scoring is unaffected.** `env/scoring.py`'s progress fraction is still pure x-position for
+non-completing instances -- a robot that reaches x = ROOM_LENGTH but never gains height still
+scores close to 1.0 via progress, just misses the >1.0 completion bonus. Only the completion
+THRESHOLD changed, not the continuous-gradient scoring shape.
+
 ## Rejected
 
 - **Sampling box count per round.** See "Box count: why 20, and why fixed" above — the full
