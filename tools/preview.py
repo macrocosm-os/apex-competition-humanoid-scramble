@@ -28,23 +28,32 @@ OUT = pathlib.Path("renders")
 
 def _lit_model(round_seed: int) -> mujoco.MjModel:
     """The scored scene for a given round seed, re-compiled with lighting and a framebuffer big
+    enough to render. For a recorded run use `_lit_model_for_boxes` instead -- a replay works from
+    the box field the history stored, not from a seed.
+    """
+    from env.course import build_course
+    rng = np.random.default_rng([round_seed, 0xB0B])
+    _, boxes, _ = build_course(rng)
+    return _lit_model_for_boxes(boxes)
+
+
+def _lit_model_for_boxes(boxes: list) -> mujoco.MjModel:
+    """The scored scene for a given box field, re-compiled with lighting and a framebuffer big
     enough to render.
 
     The robot XML is authored for headless physics: no lights worth the name, a black backdrop,
     and a 640x480 offscreen buffer. None of that changes the dynamics, so the preview compiles a
     cosmetically patched copy rather than polluting the model the referee runs.
 
-    Takes the round seed (not a `ParkourSim`) so `tools/replay.py` can rebuild the identical box
-    field from a recording's stored seed, with no sim and no policy in reach.
+    Takes the box field itself (not a `ParkourSim`, not a seed) so `tools/replay.py` can rebuild
+    the scored scene from a recording's stored conditions, with no sim and no policy in reach.
     """
     # _round_scene (env/sim.py) is the scored path but returns a compiled MjModel with no MJCF
-    # string to patch lighting into; rebuild the identical XML here through the same course
-    # sampling call (same round_seed -> same box field, bit for bit) rather than re-serialising.
-    from env.course import build_course, boxes_xml_fragment, floor_xml_fragment
+    # string to patch lighting into; re-emit the identical XML here from the same box field
+    # (same boxes -> same scene, bit for bit) rather than re-serialising.
+    from env.course import boxes_xml_fragment, build_floor, floor_xml_fragment
     from env.sim import _scene_xml
-    rng = np.random.default_rng([round_seed, 0xB0B])
-    floor_segs, boxes, _ = build_course(rng)
-    xml = _scene_xml(floor_xml_fragment(floor_segs), boxes_xml_fragment(boxes))
+    xml = _scene_xml(floor_xml_fragment(build_floor()), boxes_xml_fragment(boxes))
     # The schema permits exactly one <global>, and the robot already has one, so extend it.
     xml = re.sub(r"<global\b", '<global offwidth="1600" offheight="900"', xml, count=1)
     if "<visual>" not in xml:
