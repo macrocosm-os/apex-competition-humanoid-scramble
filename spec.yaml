@@ -22,18 +22,15 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# PLACEHOLDER digests: the tag's own release run is what produces the real ones, so they are
-# pinned in a follow-up commit once that run is green (the workflow prints both in its job
-# summary and warns when this file does not yet pin them). The platform pins by digest and
-# rejects tags.
-#
-# All-zeros rather than absent, and 64 hex digits rather than a short string, because the release
-# workflow gates on `apex-dev preflight` -- a malformed digest fails schema validation there and
-# the images job never runs, so a first release could never build. Zeros pass the FORMAT check and
-# still cannot resolve to an image, so this spec cannot be synced or activated by accident.
+# Pinned from the v0.1.0 release run (Actions run 32427533677, all four jobs green). Both digests
+# were cosign-verified before being written here: signature present, issuer the GitHub OIDC
+# endpoint, and the certificate SAN reading
+# `.../release.yml@refs/tags/v0.1.0` -- which matches this file's `cosign_identity` glob -- with
+# githubWorkflowSha c10c15b = v0.1.0^{commit}, so the images carry the tagged tree rather than a
+# stale one. The platform pins by digest and rejects tags.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
-  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  digest: sha256:45d8bd910b1cd69afdc64912de18602c1b006e658b38340cc1bb7970e37769e9
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
@@ -100,7 +97,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+    digest: sha256:d726bc65972a1bf26b0e83cfd7fa95794a6be960611c0809dba1609bc40532b6
   # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
   # with no grace: nothing is written and the round has no result, which the platform attributes
   # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
