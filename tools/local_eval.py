@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import pathlib
 import statistics
 import time
@@ -33,8 +34,16 @@ from env.history import DEFAULT_STRIDE, InstanceRecorder, write_instance
 from env.sim import FRAME_SKIP, OBS_DIM, PHYS_DT, STATE_DIM
 
 
-def rollout(session, sim: ParkourSim, max_steps: int, rec: InstanceRecorder | None = None):
+def rollout(session, sim: ParkourSim, max_steps: int, make_rec=None):
+    """Run one instance. Returns (terminal_reason, recorder or None).
+
+    The recorder is built HERE, after `sim.reset()`, rather than by the caller: its first frame is
+    the starting pose (env/history.py), so constructing it before the reset records the model's
+    uninitialised pose instead — which is not a frame of the run, and reads as a robot standing at
+    x = 0 rather than at the start line. The referee has always built it in this order.
+    """
     obs = sim.reset()
+    rec = make_rec(sim) if make_rec is not None else None
     state = np.zeros((1, STATE_DIM), np.float32)
     names = [i.name for i in session.get_inputs()]
     reason = None
@@ -45,7 +54,7 @@ def rollout(session, sim: ParkourSim, max_steps: int, rec: InstanceRecorder | No
         obs, reason = result.obs, result.terminal_reason
         if rec is not None:
             rec.capture(sim, action)
-    return reason
+    return reason, rec
 
 
 def evaluate(path: str, n: int, max_steps: int, seed: int = 1, verbose: bool = True,
@@ -58,11 +67,13 @@ def evaluate(path: str, n: int, max_steps: int, seed: int = 1, verbose: bool = T
     for i in range(n):
         params = instance_spec(i, n, seed)
         sim = ParkourSim(params)
-        rec = InstanceRecorder(i, sim, stride) if record else None
-        reason = rollout(session, sim, max_steps, rec)
+        make_rec = (lambda s, i=i: InstanceRecorder(i, s, stride)) if record else None
+        reason, rec = rollout(session, sim, max_steps, make_rec)
         score = instance_score(reason, sim.progress, sim.steps, max_steps)
-        rows.append({"instance": i, "friction_level": round(params.friction_level, 4),
-                     "wind_speed_ms": round(params.wind_speed, 2), "terminal_reason": reason,
+        rows.append({"instance": i,
+                     "wind_speed_ms": round(params.wind_speed, 2),
+                     "wind_dir_deg": round(math.degrees(params.wind_dir), 1),
+                     "terminal_reason": reason,
                      "progress": round(sim.progress, 4), "steps": sim.steps,
                      "score": round(score, 4), "max_x": round(sim.max_x, 2),
                      # The referee's key for the same quantity; history files carry both names.
@@ -72,8 +83,8 @@ def evaluate(path: str, n: int, max_steps: int, seed: int = 1, verbose: bool = T
             written.append(write_instance(record, rec.record(
                 sim, rows[-1], match_id=f"local:{pathlib.Path(path).stem}", num_instances=n)))
         if verbose:
-            print(f"  [{i + 1:3d}/{n}] mu {params.friction_level:.3f} wind "
-                  f"{params.wind_speed:4.1f} m/s  {reason:14s} {sim.max_x:6.2f} m  "
+            print(f"  [{i + 1:3d}/{n}] wind {params.wind_speed:4.1f} m/s @ "
+                  f"{math.degrees(params.wind_dir):5.1f}deg  {reason:14s} {sim.max_x:6.2f} m  "
                   f"progress {sim.progress:.3f}  score {score:.3f}")
 
     scores = [r["score"] for r in rows]
@@ -103,7 +114,7 @@ if __name__ == "__main__":
     ap.add_argument("artifact")
     ap.add_argument("-n", type=int, default=20)
     ap.add_argument("--max-steps", type=int, default=3000)
-    ap.add_argument("--seed", type=int, default=1, help="round seed: sets friction and wind")
+    ap.add_argument("--seed", type=int, default=1, help="round seed: sets the box field and wind")
     ap.add_argument("--json")
     ap.add_argument("--record", metavar="DIR",
                     help="write per-instance history files here — see tools/replay.py")

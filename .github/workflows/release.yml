@@ -1,0 +1,243 @@
+# RELEASE WORKFLOW — smoke-tests the evaluation loop, then builds, pushes, and keyless-signs
+# (cosign/OIDC) the box_scramble player + referee images.
+#
+# The spec's `signature.cosign_identity` points at THIS file's path, so keep the path
+# `.github/workflows/release.yml` and the repo name stable — changing either breaks the
+# platform's signature verification at sync time.
+#
+# The images vendor `gym_v1` (`player/gym_v1/`, `referee/gym_v1/`) and build FROM
+# python:3.12-slim, so the image builds are self-contained: no base image and no toolkit
+# dependency at build time. The toolkit is checked out for one purpose only — running
+# `apex-dev preflight` in the smoke-test job — and is pinned to the same commit the vendored
+# gym_v1 came from.
+#
+# After the first successful run, copy the digests from the job summary into spec.yaml
+# (`image.digest` and `referee.image.digest`). The platform pins by digest and rejects tags.
+#
+# Carried over from humanoid_parkour's workflow. ONE GATE IS DELIBERATELY ABSENT: parkour asserts
+# its published baseline scores above zero, and this competition has no baseline yet — the
+# inherited baseline/baseline.onnx is upstream's obs[104]/action[12] artifact and cannot load
+# against this interface at all (README "Status", docs/design.md "Open"). The conforming-policy
+# gate below covers what that gate covered about the LOOP; nothing here yet covers "a real policy
+# gets a real score", and that is a known gap, not an oversight.
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+  id-token: write            # required for keyless cosign signing
+
+env:
+  # Same commit as the `# VENDORED from ... @ <sha>` header in player/gym_v1 and referee/gym_v1.
+  TOOLKIT_REPO: macrocosm-os/apex-competitions-builder
+  TOOLKIT_REF: d063d9028dbec4bb15182794496f4aa2aac19d49
+
+jobs:
+  # Spec validation needs the toolkit installed (apex-dev). It is a SEPARATE job from the loop
+  # test on purpose: installing the toolkit puts `apex_sdk` on sys.path, which would mask a
+  # broken vendored gym_v1 (a `from apex_sdk.gym_v1 ...` left in player/gym_v1 or referee/gym_v1
+  # resolves from site-packages on the runner and then ImportErrors inside the image, where
+  # apex_sdk does not exist). Upstream shipped exactly that bug once.
+  preflight:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - name: Check out the toolkit (pinned, for apex-dev only)
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.TOOLKIT_REPO }}
+          ref: ${{ env.TOOLKIT_REF }}
+          path: toolkit
+      - run: python -m pip install --quiet ./toolkit
+      - run: apex-dev preflight --spec spec.yaml --input fixtures/input.json
+
+      # The vendored copies must match the toolkit commit they claim, and must not reference
+      # apex_sdk — the one defect that is fatal in the image and invisible on the host.
+      # Line 1-3 of each file is the VENDORED header (which mentions apex_sdk by design), so
+      # both checks start at line 5.
+      - name: Vendored gym_v1 matches the pinned toolkit
+        run: |
+          rc=0
+          for d in player referee; do
+            for f in toolkit/src/apex_sdk/gym_v1/*.py; do
+              b=$(basename "$f")
+              if tail -n +5 "$d/gym_v1/$b" | grep -q "apex_sdk"; then
+                echo "::error file=$d/gym_v1/$b::still references apex_sdk; the vendored package must import top-level gym_v1"
+                rc=1
+              fi
+              if ! diff -u <(tail -n +5 "$d/gym_v1/$b") \
+                           <(perl -pe 's/\bapex_sdk\.gym_v1\b/gym_v1/g' "$f"); then
+                echo "::error file=$d/gym_v1/$b::differs from toolkit $TOOLKIT_REF — re-vendor it"
+                rc=1
+              fi
+            done
+          done
+          exit $rc
+
+  # Gate the release on a real player+referee loop, WITHOUT the toolkit installed, so the
+  # vendored gym_v1 is the only gym_v1 on sys.path — exactly the situation inside the images.
+  smoke-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      # torch is here only to BUILD the conforming test policy (tools/make_test_policy.py);
+      # neither image ships it. CPU wheel index, so this stays a ~200 MB install.
+      - run: python -m pip install --quiet mujoco==3.11.0 numpy==2.3.4 onnxruntime==1.28.0 onnx
+          torch --extra-index-url https://download.pytorch.org/whl/cpu
+      - name: apex_sdk must NOT be importable in this job
+        run: |
+          python - <<'PY'
+          import importlib.util, sys
+          if importlib.util.find_spec("apex_sdk"):
+              sys.exit("apex_sdk is installed — this job would mask a vendoring bug")
+          print("ok: the vendored gym_v1 is the only gym_v1 on sys.path")
+          PY
+
+      # The one artifact that conforms to this competition's interface today. It cannot walk;
+      # its job is to prove the loop is wired, so the assertion is about terminal reasons rather
+      # than about score.
+      - name: A conforming policy is driven through real physics
+        run: |
+          PYTHONPATH=. python tools/make_test_policy.py --out /tmp/test_policy.onnx
+          PYTHONPATH=. python tools/local_eval.py /tmp/test_policy.onnx -n 3 \
+            --max-steps 200 -q --json /tmp/eval.json
+          # An untrained policy must produce a REAL evaluation: every instance actually stepped
+          # and terminated for a physics reason. `>= 0` would be vacuous (instance_score is
+          # non-negative by construction), and player_error/invalid_action everywhere is how a
+          # broken protocol looks, not how a weak policy looks.
+          python - <<'PY'
+          import json
+          r = json.load(open('/tmp/eval.json'))
+          bad = {'player_error', 'invalid_action'}
+          reasons = [c['terminal_reason'] for c in r['instances']]
+          assert r['n'] == 3, r
+          assert not (bad & set(reasons)), f"protocol broken, not just a weak policy: {reasons}"
+          assert sum(c['steps'] for c in r['instances']) > 0, r
+          print('ok:', reasons)
+          PY
+
+      # Within a round the box field is fixed, so the same artifact on the same round seed must
+      # score identically — that is what makes resubmission worthless and the 1% takeover margin
+      # meaningful.
+      - name: The evaluation suite is reproducible at a fixed round seed
+        run: |
+          PYTHONPATH=. python tools/local_eval.py /tmp/test_policy.onnx -n 3 \
+            --max-steps 200 --seed 7 -q --json /tmp/a.json
+          PYTHONPATH=. python tools/local_eval.py /tmp/test_policy.onnx -n 3 \
+            --max-steps 200 --seed 7 -q --json /tmp/b.json
+          python - <<'PY'
+          import json
+          a, b = (json.load(open(p)) for p in ('/tmp/a.json', '/tmp/b.json'))
+          assert a['instances'] == b['instances'], "suite is not reproducible at a fixed seed"
+          print('ok: reproducible at', a['raw_score'])
+          PY
+
+      # ...and the field must MOVE between rounds, or one solved layout is the whole competition.
+      - name: The box field rotates with the round seed
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          from env.sim import _round_scene
+          a = _round_scene(11)[2]
+          b = _round_scene(12)[2]
+          assert len(a) == len(b), (len(a), len(b))      # count is fixed by design
+          moved = sum(1 for x, y in zip(a, b) if (x.cx, x.cy, x.hx, x.density) !=
+                                                 (y.cx, y.cy, y.hx, y.density))
+          assert moved > len(a) // 2, f"only {moved}/{len(a)} boxes differ between round seeds"
+          print(f"ok: {moved}/{len(a)} boxes differ between two round seeds")
+          PY
+
+      # History is only worth writing if it still replays later, and the writer (env/history.py,
+      # also used by the referee) and reader (tools/replay.py) are different files — so assert
+      # the round trip, not just that recording ran. It also has to replay from the record ALONE:
+      # a record carries the box field it ran against, never the seed that drew it.
+      - name: A recorded run replays from its history files alone
+        run: |
+          PYTHONPATH=. python tools/local_eval.py /tmp/test_policy.onnx -n 2 \
+            --max-steps 200 -q --json /tmp/norec.json
+          PYTHONPATH=. python tools/local_eval.py /tmp/test_policy.onnx -n 2 \
+            --max-steps 200 -q --json /tmp/rec.json --record /tmp/history
+          python - <<'PY'
+          import json
+          # Recording must not perturb the run it is recording.
+          a, b = (json.load(open(p)) for p in ('/tmp/norec.json', '/tmp/rec.json'))
+          assert a['instances'] == b['instances'], "--record changed the scored result"
+          assert b['history_files'] == 2, b.get('history_files')
+          print('ok: identical with and without --record, raw_score', a['raw_score'])
+          PY
+          PYTHONPATH=. python .github/scripts/check_replay_roundtrip.py /tmp/history 2
+
+      # Both miner-facing artifacts, plus the guarantee that failing to write one cannot turn a
+      # scored round into a zero. No containers: the script drives the real referee against the
+      # real player.
+      - name: The referee writes history and the player logs every API call
+        run: |
+          PYTHONPATH=. python tools/make_test_policy.py --out /tmp/test_policy.onnx
+          PYTHONPATH=.:referee:player SUBMISSION_PATH=/tmp/test_policy.onnx \
+            python .github/scripts/check_referee_artifacts.py
+
+      # Everything a player can return is attacker-controlled input to the scorer. Each of these
+      # must come back as a scored instance, and none of them may raise out of play_game — an
+      # escaping exception is attributed to the referee, not to the submission that caused it.
+      - name: Malformed player responses are scored, not raised
+        run: |
+          PYTHONPATH=.:referee:player python .github/scripts/check_response_handling.py
+
+  images:
+    needs: [preflight, smoke-test]
+    # Only tags produce pushed, signed images. A workflow_dispatch run on a branch would
+    # otherwise publish and sign `:main`, and a signed image the spec never pins is a
+    # liability, not a convenience.
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - { name: player,  dockerfile: player/Dockerfile }
+          - { name: referee, dockerfile: referee/Dockerfile }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: sigstore/cosign-installer@v3
+      - name: Build and push
+        id: build
+        run: |
+          IMAGE=ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-${{ matrix.name }}
+          docker build -f ${{ matrix.dockerfile }} -t "$IMAGE:${{ github.ref_name }}" .
+          docker push "$IMAGE:${{ github.ref_name }}"
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE:${{ github.ref_name }}" | cut -d@ -f2)
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+      - name: Sign (keyless)
+        run: cosign sign --yes "${{ steps.build.outputs.image }}@${{ steps.build.outputs.digest }}"
+      # The platform pins by digest and rejects tags, so a released spec whose digests are
+      # zeros (or stale) cannot sync. Say so loudly in the summary rather than let a maintainer
+      # discover it at sync time.
+      - name: Digest for spec.yaml
+        run: |
+          DIGEST='${{ steps.build.outputs.digest }}'
+          {
+            echo "### ${{ matrix.name }}"
+            echo '```yaml'
+            echo "ref: ${{ steps.build.outputs.image }}"
+            echo "digest: $DIGEST"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if grep -q "$DIGEST" spec.yaml; then
+            echo "spec.yaml already pins this ${{ matrix.name }} digest" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "::warning::spec.yaml does not pin the ${{ matrix.name }} digest just built ($DIGEST). Commit it before requesting onboarding."
+            echo "> :warning: **spec.yaml does not pin this digest yet** — commit it before requesting onboarding." >> "$GITHUB_STEP_SUMMARY"
+          fi

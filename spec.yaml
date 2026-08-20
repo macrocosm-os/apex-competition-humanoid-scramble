@@ -5,29 +5,48 @@ display_name: "Box Scramble"
 kind: solo
 process_type: cpu
 
-# Fork of Humanoid Parkour (macrocosm-os/apex-competition-humanoid-parkour). Same robot, same
-# gym_v1 interface, same resource profile to start with -- the fork changes the OBSTACLE (a
-# per-round-sampled box field in a 12 m x 6 m room) rather than the runtime contract, so the
-# upstream competition's own measured resource numbers are the right starting prior. Re-measure
-# before onboarding rather than trusting this note (HANDOFF.md SS4 requires it): box free-body
-# physics is more expensive per step than parkour's static geometry (more active contacts), and
-# this spec has not yet been profiled under its own limits the way upstream's was.
+# Fork of Humanoid Parkour (macrocosm-os/apex-competition-humanoid-parkour). Same robot family,
+# same gym_v1 protocol, same resource profile to start with -- the fork changes the OBSTACLE (a
+# per-round-sampled field of 196 loose boxes in a 48 m x 6 m room) rather than the runtime
+# contract, so the upstream competition's own measured resource numbers are the right starting
+# prior. Re-measure before onboarding rather than trusting this note (HANDOFF SS4 requires it):
+# box free-body physics is more expensive per step than parkour's static geometry (196 free
+# bodies, many in contact), and this spec has not yet been profiled under its own limits the way
+# upstream's was.
 resources:
   cpu_limit: 2
   mem_limit: 1.5Gi
   gpu_count: 0
 
-# PLACEHOLDER -- fill in from your own release workflow once built, cosign-signed and pushed by
-# digest (see .github/workflows/release.yml). Do not activate against a tag; the platform pins
-# and verifies by digest only.
+# Built, pushed, and keyless-cosign-signed by this repo's release workflow (see
+# .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
+# policy).
+#
+# PLACEHOLDER digests: the tag's own release run is what produces the real ones, so they are
+# pinned in a follow-up commit once that run is green (the workflow prints both in its job
+# summary and warns when this file does not yet pin them). The platform pins by digest and
+# rejects tags.
+#
+# All-zeros rather than absent, and 64 hex digits rather than a short string, because the release
+# workflow gates on `apex-dev preflight` -- a malformed digest fails schema validation there and
+# the images job never runs, so a first release could never build. Zeros pass the FORMAT check and
+# still cannot resolve to an image, so this spec cannot be synced or activated by accident.
 image:
-  ref: ghcr.io/macrocosm-os/apex-competition-box-scramble-player
-  digest: sha256:0000000000000000000000000000000000000000000000000000000000000
+  ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
 
-# ONNX artifact, identical interface contract to upstream parkour: obs [batch,104] + state_in
-# [batch,256] -> action [batch,12] + state_out [batch,256], float32. Kept identical on purpose --
-# see docs/design.md "Why the interface didn't change" -- so a submission is a pure statement
-# about the new task, not a new format to learn.
+# ONNX artifact: the miner submits a policy graph, not code. The player image validates the
+# interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
+# state_out [batch,256], all float32 -- so there is no code to screen and no Layer-2 screen image.
+#
+# The signature is NOT upstream parkour's. This robot has full arm control (22 actuated DoF, 12
+# legs + 10 arms) because pushing, lifting and climbing are the task, where parkour's was
+# legs-only at 12 DoF; the observation grew with it (136, adding the hand-proximity rays). A
+# submission built for upstream, or for this course before 2026-08-18, fails the shape check and
+# is rejected as a typed submission failure rather than silently truncated. See env/sim.py's
+# module docstring for the full layout.
+#
+# The architecture itself is NOT constrained; only the tensor signature is.
 submission:
   artifact_type: onnx
   max_size_mb: 15
@@ -57,10 +76,13 @@ entrypoints:
   # The PLAYER sandbox: serves the ONNX policy over gym_v1; the referee drives it one
   # observation at a time. timeout_s inherited from upstream parkour's measured worst case
   # (24 instances x <=3000 steps, ~750 s) as a starting point -- RE-MEASURE before onboarding:
-  # box contact resolution (up to 20 active free bodies vs. parkour's static geometry) very
-  # plausibly costs more per physics step than parkour's baseline did, which would push this
-  # closer to or past the referee timeout below and require either raising both timeouts or
-  # cutting num_instances / max_steps_per_episode in the round input.
+  # box contact resolution (196 free bodies vs. parkour's static geometry) costs more per physics
+  # step than parkour's baseline did, which may require cutting num_instances /
+  # max_steps_per_episode in the round input rather than raising these timeouts.
+  #
+  # Deliberately LONGER than referee.timeout_s (900): the player's clock starts earlier (image
+  # start + readiness polling) and it must outlive the referee. If the player is killed first,
+  # the referee's remaining instances score player_error -- a zero the submission did not earn.
   evaluate:
     command: ["python", "/app/launch.py", "--port", "8000"]
     network_disabled: false   # the referee must reach the player on the per-job network
@@ -77,13 +99,24 @@ entrypoints:
 referee:
   protocol: gym_v1
   image:
-    ref: ghcr.io/macrocosm-os/apex-competition-box-scramble-referee
-    digest: sha256:0000000000000000000000000000000000000000000000000000000000000
-  timeout_s: 900   # RE-MEASURE (see entrypoints.evaluate.timeout_s note above) before onboarding
+    ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
+    digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+  # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
+  # with no grace: nothing is written and the round has no result, which the platform attributes
+  # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
+  # time_budget_s in the round input, default 780 -- so the kill is not what bounds the
+  # evaluation. Keep that budget comfortably below this number if either moves.
+  timeout_s: 900
 
 signature:
-  # The `@refs/tags/*` suffix is REQUIRED -- see upstream parkour's spec.yaml comment for why a
-  # bare workflow path silently fails every registry sync pass. Point this at YOUR OWN repo's
-  # release workflow once the box-scramble repo has one; do not reuse humanoid-parkour's identity.
-  cosign_identity: https://github.com/macrocosm-os/apex-competition-box-scramble/.github/workflows/release.yml@refs/tags/*
+  # The `@refs/tags/*` suffix is REQUIRED, not decoration. A GitHub keyless signature's Fulcio
+  # certificate carries the SAN `<workflow path>@<ref>`, and the registry syncer anchors a
+  # glob-free identity as an exact-match regexp -- so a bare path can never match and the spec is
+  # silently skipped on every sync pass. Upstream parkour hit exactly this.
+  #
+  # The repo is `apex-competition-humanoid-scramble` (the earlier `apex-competition-box-scramble`
+  # here was aspirational and never existed). A Fulcio SAN is built from the repository at signing
+  # time, so this must name the repo the release workflow actually runs in, or no signature will
+  # ever match.
+  cosign_identity: https://github.com/macrocosm-os/apex-competition-humanoid-scramble/.github/workflows/release.yml@refs/tags/*
   cosign_issuer: https://token.actions.githubusercontent.com

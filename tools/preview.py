@@ -198,14 +198,14 @@ if __name__ == "__main__":
     ap.add_argument("--run", help="ONNX policy to film driving the course")
     ap.add_argument("--instance", type=int, default=0)
     ap.add_argument("--of", type=int, default=24, help="suite size the instance is drawn from")
-    ap.add_argument("--seed", type=int, default=1, help="round seed: sets friction and wind")
+    ap.add_argument("--seed", type=int, default=1, help="round seed: sets the box field and wind")
     ap.add_argument("--max-steps", type=int, default=3000)
     ap.add_argument("--no-stills", action="store_true")
     a = ap.parse_args()
     OUT.mkdir(exist_ok=True)
     params = instance_spec(a.instance, a.of, a.seed)
-    print(f"instance {a.instance} of {a.of} at seed {a.seed}: friction level "
-          f"{params.friction_level:.3f}, wind {params.wind_speed:.1f} m/s")
+    print(f"instance {a.instance} of {a.of} at seed {a.seed}: wind "
+          f"{params.wind_speed:.1f} m/s @ {math.degrees(params.wind_dir):.1f}deg")
     sim = ParkourSim(params)
     if not a.no_stills:
         render_course(sim)
