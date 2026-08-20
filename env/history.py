@@ -8,15 +8,11 @@ Per frame: `qpos` for replay, and `action` — what the policy returned — as d
 Re-simulating from actions would depend on bit-exact physics and could silently drift; positions
 cannot. Arrays are base64 float32.
 
-`conditions.round_seed` is stored (unlike upstream parkour, which deliberately omits its
-equivalent) because this fork's box field is compile-time geometry keyed by round seed, not a
-runtime friction value -- a replay has no way to reconstruct box sizes/positions/densities
-without it, whereas parkour's fixed geometry needed only its per-geom friction array. This is
-safe to include here for the same reason parkour omits the analogous field there: round seeds are
-only revealed in metadata after a round completes, at which point the box field they produced is
-no longer secret (the round is over), so recording it in a post-round-revealed history file leaks
-nothing about a FUTURE round's field. See docs/design.md for why the room geometry (unlike
-parkour's) is intentionally NOT public between rounds.
+`conditions` carries the box field the instance was run against -- every box's zone, position,
+half-extents, density and yaw -- and the wind it was run under. That is the state a replay needs
+to rebuild the scene, and it is what the record is for: the conditions the instance faced, not
+the inputs that produced them. Neither the round seed nor the per-instance seed is recorded, the
+same choice upstream parkour makes for its own per-geom friction array.
 
 Lives in `env/` because the referee image copies it, not `tools/` — one format serves both.
 """
@@ -34,7 +30,13 @@ import numpy as np
 from .sim import FRAME_SKIP, PHYS_DT
 
 # Bump the minor half when adding keys a reader can ignore, the major half when it cannot.
-FORMAT = "humanoid_parkour_history/1"
+# box_scramble/1 replaces the inherited humanoid_parkour_history/1: `conditions` now carries the
+# box field (see the module docstring), which a replay cannot ignore -- it is the scene.
+FORMAT = "box_scramble_history/1"
+
+# Fields of one recorded box, in this order, packed as a float32 (N_BOXES, 8) array. Zones are
+# stored separately as a plain list of strings: they are labels, not numbers.
+BOX_FIELDS = ("cx", "cy", "cz", "hx", "hy", "hz", "density", "yaw")
 
 # Recording every control step is 50 Hz. 2 is the default because the replay renders at 25 fps
 # anyway (tools/replay.py picks a stride to hit ~30 fps), so at stride 2 the video is IDENTICAL
@@ -67,6 +69,32 @@ def unpack(d: dict[str, Any]) -> np.ndarray:
     return np.frombuffer(raw, dtype=np.dtype(dtype)).reshape([int(x) for x in d["shape"]])
 
 
+def pack_boxes(boxes: list[Any]) -> dict[str, Any]:
+    """The round's box field as {zones, values} -- one row per box, columns `BOX_FIELDS`."""
+    values = np.asarray([[getattr(b, f) for f in BOX_FIELDS] for b in boxes], np.float32)
+    return {"fields": list(BOX_FIELDS), "zones": [str(b.zone) for b in boxes],
+            "values": pack(values)}
+
+
+def boxes_from_record(record: dict[str, Any]) -> list[Any]:
+    """Rebuild the `env.course.Box` list a record was run against.
+
+    Imported lazily so `tools/replay.py` can read a record without pulling in the course module's
+    sampling code, and so this module stays importable in the referee image on its own.
+    """
+    from .course import Box
+
+    field = record["conditions"]["box_field"]
+    fields = [str(f) for f in field["fields"]]
+    if fields != list(BOX_FIELDS):
+        raise ValueError(f"unexpected box_field columns {fields}")
+    values = unpack(field["values"])
+    zones = [str(z) for z in field["zones"]]
+    if values.shape != (len(zones), len(BOX_FIELDS)):
+        raise ValueError(f"box_field values {values.shape} do not match {len(zones)} zones")
+    return [Box(zone, *(float(v) for v in row)) for zone, row in zip(zones, values)]
+
+
 class InstanceRecorder:
     """Buffers one instance's motion, then renders it as a history record.
 
@@ -88,6 +116,9 @@ class InstanceRecorder:
         self._ticks: list[int] = []
         self._nq = int(sim.model.nq)
         self._params = sim.params
+        # The field this instance ran against, captured once: it is fixed for the whole round, so
+        # recording it per instance costs ~6 KB and makes every file independently replayable.
+        self._box_field = pack_boxes(sim.boxes)
         # Frame 0 is the starting pose, before any action has been taken.
         self._append(sim, None)
 
@@ -110,13 +141,11 @@ class InstanceRecorder:
             "instance": self.index,
             "num_instances": num_instances,
             "conditions": {
-                # Read off the instance's own params, not the caller's row, so the referee and
-                # the local tools cannot drift. `params.seed` (the per-INSTANCE seed; reset noise
-                # only) is deliberately NOT included, same as upstream parkour -- but
-                # `round_seed` IS, because it is the only handle a replay has on this fork's
-                # compile-time box geometry, and by the time a history file is revealed
-                # (post-round) the round it describes is over. See the module docstring.
-                "round_seed": self._params.round_seed,
+                # Read off the instance's own params and its own compiled field, not the caller's
+                # row, so the referee and the local tools cannot drift. Seeds are not conditions
+                # and are not recorded (module docstring); the box field below is the geometry
+                # this instance was actually run against, which is what a replay needs.
+                "box_field": self._box_field,
                 "wind_speed_ms": round(self._params.wind_speed, 2),
                 "wind_dir_deg": round(math.degrees(self._params.wind_dir), 1),
             },

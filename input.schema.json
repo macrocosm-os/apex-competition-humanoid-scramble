@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "box_scramble round input",
-  "description": "Evaluation shape for one round. Unlike upstream Humanoid Parkour (static, public geometry), the box field ITSELF is drawn from `seed` inside the referee (env/course.sample_boxes) -- fixed box count and zone roles (9 scramble / 5 push / 6 climb), sampled size/density/placement. Each instance's wind is drawn from the same seed (env/sim.instance_spec), so the suite differs every round and the box field is identical across every instance within one round.",
+  "description": "Evaluation shape for one round. Unlike upstream Humanoid Parkour (static, public geometry), the box field ITSELF is drawn from `seed` inside the referee (env/course.sample_boxes) -- fixed box count and zone roles (100 scramble / 60 push / 36 climb), sampled size/density/placement. Each instance's wind is drawn from the same seed (env/sim.instance_spec), so the suite differs every round and the box field is identical across every instance within one round.",
   "type": "object",
   "additionalProperties": false,
   "required": ["seed", "num_instances", "max_steps_per_episode", "deadline_ms"],
@@ -9,7 +9,7 @@
     "seed": {
       "type": "integer",
       "minimum": 0,
-      "description": "Round seed: the whole box field (sizes, densities, placement) AND every instance's wind derive from it. Must be fresh each round, and must not be published while the round is open -- a known seed makes the whole room layout computable offline. Required rather than optional on purpose: a missing seed would silently freeze the box field instead of failing.",
+      "description": "Round seed: the whole box field (sizes, densities, placement) AND every instance's wind derive from it. One draw per round, fresh each round, so every instance in a round faces the identical field and the field rotates between rounds. Required rather than optional on purpose: a missing seed would silently freeze the box field instead of failing.",
       "examples": [1]
     },
     "num_instances": {
@@ -23,7 +23,7 @@
       "minimum": 100,
       "maximum": 3000,
       "default": 3000,
-      "description": "Control-step cap per instance (1 step = 20 ms sim time, so 3000 = 60 s). Inherited from upstream parkour's wall-clock sizing against a 900 s referee timeout; RE-MEASURE before onboarding, since box contact dynamics (up to 20 active free bodies) very plausibly cost more per physics step than parkour's static geometry did, which could push worst-case wall time past this budget at the inherited value."
+      "description": "Control-step cap per instance (1 step = 20 ms sim time, so 3000 = 60 s). Inherited from upstream parkour's wall-clock sizing against a 900 s referee timeout; RE-MEASURE before onboarding, since box contact dynamics (196 free bodies) cost more per physics step than parkour's static geometry did. The referee's own time budget (`time_budget_s`) is what actually bounds the suite; this bounds one instance's simulated length."
     },
     "deadline_ms": {
       "type": "integer",
@@ -47,6 +47,13 @@
       "minimum": 1,
       "maximum": 50,
       "description": "Keep every Nth control step in the history. Default 2 (25 Hz) via env/history.DEFAULT_STRIDE."
+    },
+    "time_budget_s": {
+      "type": "number",
+      "minimum": 30,
+      "maximum": 3000,
+      "default": 780,
+      "description": "Wall-clock seconds the whole instance suite may take, shared out equally across the instances still to run. An instance that reaches its share ends as `time_limit` and scores as a run that crossed no room; instances the budget never reached end the same way and stay in the mean. Must sit comfortably below `referee.timeout_s` in spec.yaml, which is a hard kill with no grace period. Default 780 (env referee DEFAULT_SUITE_BUDGET_S) against a 900 s referee timeout."
     }
   }
 }

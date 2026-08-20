@@ -15,7 +15,7 @@ quantity a renderer needs. Nothing is integrated, so a replay cannot drift from 
 way re-simulating from the action log could — and it needs neither the submission nor the round
 seed, so a run stays viewable after both are gone.
 
-The scene is rebuilt from the frictions stored per instance, through the same `_lit_model` the
+The scene is rebuilt from the box field stored per instance, through the same model builder the
 preview uses, so it is the scored geometry with lights added and nothing else changed.
 
 `--live` needs `mjpython` on macOS rather than `python`: the passive viewer has to own the main
@@ -31,8 +31,8 @@ import time
 import mujoco
 
 from env.course import ROOM_LENGTH
-from env.history import read_all, unpack
-from tools.preview import OUT, _camera, _lit_model, frames_dir, mp4, png
+from env.history import boxes_from_record, read_all, unpack
+from tools.preview import OUT, _camera, _lit_model_for_boxes, frames_dir, mp4, png
 
 TARGET_FPS = 30.0
 
@@ -48,7 +48,7 @@ class Run:
         self.qpos = unpack(frames["qpos"])
         self.ticks = unpack(frames["ticks"])
         self.action = unpack(frames["action"])
-        self.round_seed = record["conditions"]["round_seed"]
+        self.boxes = boxes_from_record(record)
         timing = record.get("timing", {})
         self.frame_dt = float(timing.get("control_dt", 0.02)) * int(timing.get("stride", 1))
 
@@ -83,8 +83,8 @@ def _stride_for(frame_dt: float, target_fps: float) -> tuple[int, float]:
 
 
 def _scene(run: Run) -> tuple[mujoco.MjModel, mujoco.MjData]:
-    """Rebuild the instance's scene from its recorded round seed, refusing a mismatched history."""
-    model = _lit_model(run.round_seed)
+    """Rebuild the instance's scene from its recorded box field, refusing a mismatched history."""
+    model = _lit_model_for_boxes(run.boxes)
     if run.qpos.shape[1] != model.nq:
         raise ValueError(f"history has nq={run.qpos.shape[1]}, this model has nq={model.nq}; "
                          "the file predates a model change and cannot be replayed against it")

@@ -60,10 +60,10 @@ scaled with the room), not itself randomised per round. What varies round to rou
 size, density, and placement jitter, drawn from the round seed (`env/course.sample_boxes`), with a
 real no-overlap placement pass (rejection sampling against a shared footprint registry) so boxes
 don't spawn interpenetrating. See docs/design.md for the packing-fraction math behind the
-room-size-to-box-count ratio, and for the explicit reasoning on why count is fixed rather than
-sampled (short version: sampling count per round would blend policy skill with luck of the draw
-into one noisy number — the same anti-Goodhart argument upstream makes for keeping its own course
-geometry fixed and randomising only friction/wind).
+room-size-to-box-count ratio, and for the reasoning on why count is fixed rather than sampled
+(short version: sampling count per round would blend policy skill with luck of the draw into one
+noisy number, the same reason upstream keeps its own course geometry fixed and randomises only
+friction/wind).
 
 Boxes are physical bodies with mass derived from sampled density — pushing and climbing are real
 contact-solver outcomes, not scripted animations.
@@ -81,29 +81,33 @@ python tools/preview.py --seed 1  # stills + flythrough (needs mujoco + ffmpeg)
 
 ## Scoring
 
-Identical to upstream, unchanged:
+Upstream's scoring, plus the evaluation's time budget (`time_limit`, below):
 
 | Outcome | Score |
 |---|---|
 | completed | `1.0 + (max_steps - steps) / max_steps` → (1.0, 2.0] |
 | fell / timeout / out_of_bounds | `progress`, the fraction of the room crossed → [0.0, 1.0) |
-| physics_glitch / invalid / player error | 0.0 |
+| physics_glitch / time_limit / invalid / player error | 0.0 |
 
 `raw_score` is the mean over the instances. Progress is continuous along the room regardless of
 which zone a robot is in, so a policy that gets 2 m further into the scramble field scores 2 m
 better even without clearing it — the same continuous-gradient principle upstream uses.
 
-## Why the box field is randomised, not fixed
+An instance scores for the room it crossed under its own physics, within both limits it runs
+under: the step cap (`max_steps_per_episode`) and the evaluation's wall-clock budget
+(`time_budget_s`, shared equally across the instances still to run). An instance that reaches its
+share of the clock ends as `time_limit`, and instances the budget never reached end the same way —
+they stay in the mean either way, so the score is always the average over the full suite. Answering
+each `/act` well inside `deadline_ms` is therefore part of the task, not just a limit on it.
 
-Same reasoning as upstream's own friction/wind randomisation, applied one level up: if the box
-field were public and static, the cheapest route to the top would be solving one known layout
-offline and replaying the trajectory, rather than learning to perceive and react to terrain. The
-whole field (every box's size, density, and position) is drawn from a per-round seed
-(`env/course.sample_boxes`) that is not published while the round is open. **Unlike** upstream,
-this fork's "what's fixed" list is shorter — upstream keeps geometry public and fixed forever,
-randomising only friction and wind; this course keeps the room's *shape* (dimensions, zone
-lengths, box count and roles) fixed across every round, but the field's specific instantiation
-(which sizes, which densities, which exact positions) rotates every round along with wind.
+## What varies per round, and what does not
+
+The room's *shape* — dimensions, zone lengths, box count and roles — is fixed across every round.
+The field's specific instantiation is not: every box's size, density and position, plus each
+instance's wind, is drawn from one per-round seed (`env/course.sample_boxes`), rotating each round.
+Within a round every instance faces the identical field, so the same submission always scores the
+same. This is upstream's friction/wind randomisation applied one level up: upstream keeps its
+geometry fixed forever and varies only friction and wind, this course varies the field itself.
 
 ## Perception
 
@@ -143,12 +147,12 @@ env/            room + box-field sampling, physics, perception, gates, scoring, 
   course.py     FORKED — the room and box field (was: the linear maneuver sequence)
   sim.py        FORKED — round-scoped scene compilation, box-aware ray casts (was: course-scoped)
   scoring.py    unchanged from upstream
-  history.py    forked — records round_seed instead of per-geom frictions
+  history.py    forked — records the sampled box field as each instance's conditions
   assets/       vendored Unitree G1 12-DoF model + collision meshes (BSD-3), unchanged
 player/         ONNX serving + interface validation (player image), unchanged from upstream
 referee/        forked — match driver reads the new env/ modules; no friction/mu in metadata
 baseline/       PROVENANCE.md carried from upstream; NOT yet re-run against this course (see Status)
-tools/          forked — preview/replay rebuild scenes from round seed, not friction array
+tools/          forked — preview builds a scene from a seed, replay from a recorded box field
 docs/           design notes, including the box-count-fixed-vs-variable decision and open items
 spec.yaml       the competition manifest — placeholder image digests, inherited timeout/sizing
 ```

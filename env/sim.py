@@ -37,8 +37,11 @@ Termination gates (each maps to a terminal_reason the miner sees post-round):
                     "ELEVATED FINISH" below
     fell            pelvis under FALL_CLEARANCE above the surface below it, or torso past ~66 deg
     out_of_bounds   |y| > TRACK_HALF_W (no walking around the room through a wall)
-    physics_glitch  NaN/Inf state or |qvel| > 100 (glitch-surfing scores 0)
+    physics_glitch  NaN/Inf state or |qvel| > 100 -- the run left the physical regime the room
+                    is defined in, so it is not a crossing of it
     timeout         max_steps control steps elapsed
+    time_limit      the evaluation's wall-clock budget ran out on this instance (referee-side,
+                    see referee/referee.py)
 
 ELEVATED FINISH (2026-08-18, Amy/Crux): completion used to be x-position only, which meant a
 robot that never left the floor (weaving/pushing across the mixed field on flat ground, dashing
@@ -60,8 +63,9 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .course import (BOX_PREFIX, FINISH_RISE, N_BOXES, PLINTH_TOP, ROOM_LENGTH, TRACK_HALF_W,
-                     WORLD_GROUP, boxes_xml_fragment, build_course, floor_xml_fragment)
+from .course import (BOX_PREFIX, FINISH_RISE, LEAP_COUNT, N_BOXES, PLINTH_TOP, ROOM_LENGTH,
+                     TRACK_HALF_W, WORLD_GROUP, boxes_xml_fragment, build_course,
+                     floor_xml_fragment)
 
 # Vertical tolerance on the elevated-finish height gate (2026-08-18) -- a small margin below the
 # platform's true top so a pelvis that has genuinely mounted the platform (but is mid-stride, not
@@ -237,11 +241,16 @@ def _scene_xml(floor_frag: str, boxes_frag: str) -> str:
 # compiled once, not per instance"). A single referee process only ever evaluates one round, so
 # the cache holds exactly one entry in practice; keeping it a dict (not a single slot) just means
 # a local tool that walks multiple seeds in one process doesn't recompile needlessly either.
-_MODEL_CACHE: dict[int, tuple[mujoco.MjModel, list[int]]] = {}
+_MODEL_CACHE: dict[int, tuple[mujoco.MjModel, list[int], list]] = {}
 
 
-def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int]]:
-    """Compile (or fetch) the model for this round's box field. Returns (model, box_body_ids)."""
+def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int], list]:
+    """Compile (or fetch) the model for this round's box field.
+
+    Returns (model, box_body_ids, boxes). The `boxes` list is the sampled field itself -- the
+    geometry the instance was run against -- and is what `env/history.py` records as the
+    instance's conditions and what `tools/replay.py` rebuilds the scene from.
+    """
     cached = _MODEL_CACHE.get(round_seed)
     if cached is not None:
         return cached
@@ -252,9 +261,12 @@ def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int]]:
     model.opt.timestep = PHYS_DT
     model.opt.density = AIR_DENSITY   # enables the fluid model opt.wind acts through
     box_ids = [model.body(f"{BOX_PREFIX}{i}").id for i in range(len(boxes))]
-    assert len(box_ids) == N_BOXES, f"expected {N_BOXES} box bodies, compiled {len(box_ids)}"
-    _MODEL_CACHE[round_seed] = (model, box_ids)
-    return model, box_ids
+    # N_BOXES counts the round-sampled field; the fixed leap chain (env/course._leap_chain_boxes,
+    # added with the elevated finish) is emitted alongside it.
+    expected = N_BOXES + LEAP_COUNT
+    assert len(box_ids) == expected, f"expected {expected} box bodies, compiled {len(box_ids)}"
+    _MODEL_CACHE[round_seed] = (model, box_ids, boxes)
+    return model, box_ids, boxes
 
 
 class ParkourSim:
@@ -263,7 +275,9 @@ class ParkourSim:
 
     def __init__(self, params: InstanceParams):
         self.params = params
-        self.model, self._box_ids = _round_scene(params.round_seed)
+        # `boxes` is the field this instance actually ran against; the history record stores it as
+        # the instance's conditions so a replay reconstructs the scene from the geometry itself.
+        self.model, self._box_ids, self.boxes = _round_scene(params.round_seed)
         self.model.opt.wind[:] = self.params.wind
         self.data = mujoco.MjData(self.model)
         self._pelvis = self.model.body("pelvis").id
