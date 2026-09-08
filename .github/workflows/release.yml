@@ -231,6 +231,11 @@ jobs:
           PY
           PYTHONPATH=. python .github/scripts/check_replay_roundtrip.py /tmp/history 2
 
+      # Declared friction must reach the solver. It did not in 0.1.0-0.1.2, and no score can tell
+      # an applied band from one MuJoCo mixed away -- hence a contact-level check.
+      - name: Declared surface friction reaches the solver
+        run: PYTHONPATH=. python .github/scripts/check_friction_reaches_contacts.py
+
       # History is delivered to the miner and rendered by the dashboard, so its SIZE is a
       # contract too. /1 wrote all 196 box free joints every frame: the PR-env load test stored
       # 4.9 GB for 55 submissions, ~119 MB each, single files up to 11 MB. /2 records the robot

@@ -65,7 +65,8 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .course import (BOX_PREFIX, FINISH_RISE, LEAP_COUNT, N_BOXES, PLINTH_TOP, ROOM_LENGTH,
+from .course import (BOX_PREFIX, FINISH_RISE, GEOM_PREFIX, LEAP_COUNT, N_BOXES, PLINTH_TOP,
+                     ROOM_LENGTH,
                      TRACK_HALF_W, WORLD_GROUP, boxes_xml_fragment, build_course,
                      floor_xml_fragment)
 
@@ -246,6 +247,22 @@ def _scene_xml(floor_frag: str, boxes_frag: str) -> str:
 _MODEL_CACHE: dict[int, tuple[mujoco.MjModel, list[int], list]] = {}
 
 
+def _make_surface_friction_authoritative(model: mujoco.MjModel) -> int:
+    """Raise `geom_priority` on every room and crate geom, so their friction wins at contacts.
+
+    MuJoCo mixes contact friction as the element-wise MAXIMUM at equal priority, and the G1
+    declares none, so its feet default to 1.0 and discard every mu this course draws. Crates need
+    it as well as the room: a crate is a surface to stand on, not just to push.
+    """
+    changed = 0
+    for gid in range(model.ngeom):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid) or ""
+        if name.startswith(GEOM_PREFIX) or name.startswith(BOX_PREFIX):
+            model.geom_priority[gid] = 1
+            changed += 1
+    return changed
+
+
 def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int], list]:
     """Compile (or fetch) the model for this round's box field.
 
@@ -262,6 +279,7 @@ def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int], list]:
     model = mujoco.MjModel.from_xml_string(xml, _mesh_assets())
     model.opt.timestep = PHYS_DT
     model.opt.density = AIR_DENSITY   # enables the fluid model opt.wind acts through
+    _make_surface_friction_authoritative(model)
     box_ids = [model.body(f"{BOX_PREFIX}{i}").id for i in range(len(boxes))]
     # N_BOXES counts the round-sampled field; the fixed leap chain (env/course._leap_chain_boxes,
     # added with the elevated finish) is emitted alongside it.
