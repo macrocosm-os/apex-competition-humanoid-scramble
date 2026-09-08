@@ -1,22 +1,11 @@
-"""The room's and the crates' sliding friction must reach the solver, not just the model.
+"""The room's and the crates' friction must reach the solver, not just the model.
 
-Regression guard for a defect that shipped in 0.1.0-0.1.2 and was invisible in every score. MuJoCo
-mixes contact parameters from both geoms in a pair, and for friction the mix is the element-wise
-MAXIMUM when the two have equal `geom_priority`. `g1_22dof.xml` sets no geom friction, so the
-robot's feet and hands sit at MuJoCo's default of 1.0 -- above every mu this course draws. Measured
-before the fix, while a policy actually walked the field: crates declaring 0.265-0.379 and a floor
-declaring 0.900 all solved at exactly 1.0000. The whole friction axis was inert, which is why a
-crate's density changed how heavy it was but not how slippery.
+MuJoCo mixes contact friction as the element-wise MAXIMUM at equal `geom_priority`, and
+`g1_22dof.xml` declares none, so the robot's feet default to 1.0 and discard every mu this course
+draws. Inert in 0.1.0-0.1.2; same defect and same fix as humanoid_parkour v0.7.0 and
+humanoid_olympics 0.2.0.
 
-The same defect shipped in both sibling competitions and was fixed the same way -- humanoid_parkour
-v0.7.0 and humanoid_olympics 0.2.0 -- each guarded by its own
-`tests/test_friction_reaches_contacts.py`. This is that guard in this repo's idiom.
-
-Box Scramble needs BOTH families raised, unlike its siblings which have only static course geoms:
-a crate is a surface to stand on and to shove, so its friction has to win against the foot too.
-
-These assert at CONTACT level on purpose. A score-based check cannot tell "friction was applied"
-apart from "friction was ignored and the policy happens to be robust".
+Asserts on SOLVED contact friction: a score cannot tell an applied band from one mixed away.
 
     PYTHONPATH=. python .github/scripts/check_friction_reaches_contacts.py
 """
@@ -53,12 +42,10 @@ def settle(sim: ParkourSim, steps: int = SETTLE_STEPS) -> ParkourSim:
 
 
 def surface_contacts(sim: ParkourSim) -> list[tuple[str, float, float]]:
-    """(geom name, declared mu, solved contact mu) for ROBOT-versus-surface contacts.
+    """(geom name, declared mu, solved mu) for ROBOT-versus-surface contacts.
 
-    Deliberately excludes surface-versus-surface pairs. A crate resting on the floor is two geoms
-    that now both carry priority 1, so MuJoCo mixes them by max() -- a 0.75 crate on a 0.90 floor
-    correctly solves at 0.90. That is the rule working, not the defect. The invariant being
-    guarded is only ever about a surface losing to the ROBOT's 1.0 default.
+    Surface/surface pairs are excluded: a 0.75 crate on the 0.90 floor correctly mixes to 0.90.
+    The invariant is only about a surface losing to the robot's 1.0 default.
     """
     out = []
     for c in range(sim.data.ncon):
@@ -89,7 +76,7 @@ sim = ParkourSim(instance_spec(0, 24, SEED))
 sim.reset()
 model = sim.model
 
-# 1. Surfaces must outrank everything else, or max() discards whatever they asked for.
+# Surfaces must outrank the robot, or max() discards whatever they asked for.
 surface_prio, other_prio = set(), set()
 for gid in range(model.ngeom):
     (surface_prio if is_surface(model, gid) else other_prio).add(int(model.geom_priority[gid]))
@@ -97,22 +84,19 @@ check("room and crate geoms outrank the robot",
       bool(surface_prio) and min(surface_prio) > max(other_prio),
       f"surfaces {sorted(surface_prio)} vs everything else {sorted(other_prio)}")
 
-# 2. The population this protects has to be real: crates must ask for mu below the foot's 1.0,
-#    or the check cannot distinguish a working fix from max() picking the foot every time.
+# Crates must ask for sub-1.0 mu, or this cannot tell a working fix from max() picking the foot.
 crate_mus = [float(model.geom_friction[g, 0]) for g in range(model.ngeom)
              if geom_name(model, g).startswith(BOX_PREFIX)]
 check("crates ask for mu below the robot's 1.0 default",
       bool(crate_mus) and max(crate_mus) < 1.0 - TOL,
       f"{len(crate_mus)} crates, mu {min(crate_mus):.3f}-{max(crate_mus):.3f}" if crate_mus else "none")
 
-# 3. Crate friction must actually vary -- density drives it, so a field of one mu means the axis
-#    is decorative even with priority set correctly.
+# Density drives crate friction, so a field of one mu means the axis is decorative anyway.
 check("crate friction varies across the field",
       len({round(m, 3) for m in crate_mus}) >= 10,
       f"{len({round(m, 3) for m in crate_mus})} distinct mu values across {len(crate_mus)} crates")
 
-# 4. A real settled contact must solve at what the surface asked for, not at 1.0. This is the
-#    exact failure signature: declared well below 1.0, solved at exactly 1.0.
+# The failure signature: declared well below 1.0, solved at exactly 1.0.
 settle(sim)
 contacts = surface_contacts(sim)
 check("the robot forms contacts with the room", bool(contacts), "no surface contacts formed")
@@ -130,18 +114,17 @@ if contacts:
           not pinned,
           "; ".join(f"{n} asked {d:.4f} solved 1.0" for n, d, _ in pinned[:4]))
 
-# 5. Drop the robot onto a crate, so a CRATE contact is exercised and not only the floor. Crates
-#    are the family the siblings' guards never had to cover.
+# Drop the robot onto a crate: the siblings' guards never had to cover this family.
 crates = [(g, float(model.geom_friction[g, 0])) for g in range(model.ngeom)
           if geom_name(model, g).startswith(BOX_PREFIX)]
-target_gid, target_mu = min(crates, key=lambda t: t[1])       # the slipperiest crate in the field
+target_gid, target_mu = min(crates, key=lambda t: t[1])       # slipperiest crate in the field
 on_crate = ParkourSim(instance_spec(0, 24, SEED))
 on_crate.reset()
 pos = on_crate.data.geom_xpos[target_gid].copy()
 half_z = float(on_crate.model.geom_size[target_gid][2])
 on_crate.data.qpos[0] = float(pos[0])
 on_crate.data.qpos[1] = float(pos[1])
-on_crate.data.qpos[2] = float(pos[2]) + half_z + 0.80        # stand the pelvis above its top face
+on_crate.data.qpos[2] = float(pos[2]) + half_z + 0.80        # pelvis above its top face
 mujoco.mj_forward(on_crate.model, on_crate.data)
 settle(on_crate, 120)
 crate_contacts = [(n, d, s) for n, d, s in surface_contacts(on_crate) if n.startswith(BOX_PREFIX)]

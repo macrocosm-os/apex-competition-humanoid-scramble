@@ -248,26 +248,11 @@ _MODEL_CACHE: dict[int, tuple[mujoco.MjModel, list[int], list]] = {}
 
 
 def _make_surface_friction_authoritative(model: mujoco.MjModel) -> int:
-    """Raise `geom_priority` on every room and crate geom. Returns how many were changed.
+    """Raise `geom_priority` on every room and crate geom, so their friction wins at contacts.
 
-    Writing `geom_friction` is necessary but not sufficient. MuJoCo mixes contact parameters from
-    BOTH geoms in a pair, and for friction the mix is the element-wise MAXIMUM whenever the two
-    have equal priority. `g1_22dof.xml` declares no geom friction, so the robot's feet and hands
-    sit at MuJoCo's default of 1.0 -- above every mu this course draws (crates 0.26-0.75, the room
-    floor 0.90), so max() took the robot's value and NONE of the declared friction reached the
-    solver. Measured before this fix: crates declaring 0.265 and a floor declaring 0.900 both
-    solved at exactly 1.0000.
-
-    Raising priority on the surface side makes its contact parameters win outright, which is
-    MuJoCo's documented mechanism for exactly this case. Both families need it here, unlike
-    upstream parkour which has only static course geoms: a crate is a surface to stand on and to
-    push, and its density already sets how heavy it is, so its friction should decide how well it
-    can be shoved or mounted rather than being overwritten by the foot.
-
-    Constant per geom, so it belongs at model build; only `geom_friction` itself varies per round.
-    Gated by release CI on the SOLVED contact friction rather than on a score -- a score cannot
-    distinguish a band that applied from one that was mixed away, which is how this survived to
-    v0.1.2.
+    MuJoCo mixes contact friction as the element-wise MAXIMUM at equal priority, and the G1
+    declares none, so its feet default to 1.0 and discard every mu this course draws. Crates need
+    it as well as the room: a crate is a surface to stand on, not just to push.
     """
     changed = 0
     for gid in range(model.ngeom):

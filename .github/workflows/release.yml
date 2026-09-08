@@ -231,13 +231,8 @@ jobs:
           PY
           PYTHONPATH=. python .github/scripts/check_replay_roundtrip.py /tmp/history 2
 
-      # The friction the room and the crates declare has to reach the solver. It did not in
-      # 0.1.0-0.1.2: MuJoCo mixes contact friction as the element-wise MAXIMUM at equal
-      # geom_priority, and the G1 declares none, so its feet sat at MuJoCo's 1.0 default and every
-      # surface this course draws (crates 0.26-0.75, floor 0.90) was discarded. Both siblings
-      # shipped and fixed the same defect -- humanoid_parkour v0.7.0, humanoid_olympics 0.2.0 --
-      # and both guard it at contact level, because no score can tell an applied band from one
-      # that was mixed away.
+      # Declared friction must reach the solver. It did not in 0.1.0-0.1.2, and no score can tell
+      # an applied band from one MuJoCo mixed away -- hence a contact-level check.
       - name: Declared surface friction reaches the solver
         run: PYTHONPATH=. python .github/scripts/check_friction_reaches_contacts.py
 
