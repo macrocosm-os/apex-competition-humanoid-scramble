@@ -231,6 +231,16 @@ jobs:
           PY
           PYTHONPATH=. python .github/scripts/check_replay_roundtrip.py /tmp/history 2
 
+      # The friction the room and the crates declare has to reach the solver. It did not in
+      # 0.1.0-0.1.2: MuJoCo mixes contact friction as the element-wise MAXIMUM at equal
+      # geom_priority, and the G1 declares none, so its feet sat at MuJoCo's 1.0 default and every
+      # surface this course draws (crates 0.26-0.75, floor 0.90) was discarded. Both siblings
+      # shipped and fixed the same defect -- humanoid_parkour v0.7.0, humanoid_olympics 0.2.0 --
+      # and both guard it at contact level, because no score can tell an applied band from one
+      # that was mixed away.
+      - name: Declared surface friction reaches the solver
+        run: PYTHONPATH=. python .github/scripts/check_friction_reaches_contacts.py
+
       # History is delivered to the miner and rendered by the dashboard, so its SIZE is a
       # contract too. /1 wrote all 196 box free joints every frame: the PR-env load test stored
       # 4.9 GB for 55 submissions, ~119 MB each, single files up to 11 MB. /2 records the robot

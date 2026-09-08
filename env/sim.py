@@ -65,7 +65,8 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .course import (BOX_PREFIX, FINISH_RISE, LEAP_COUNT, N_BOXES, PLINTH_TOP, ROOM_LENGTH,
+from .course import (BOX_PREFIX, FINISH_RISE, GEOM_PREFIX, LEAP_COUNT, N_BOXES, PLINTH_TOP,
+                     ROOM_LENGTH,
                      TRACK_HALF_W, WORLD_GROUP, boxes_xml_fragment, build_course,
                      floor_xml_fragment)
 
@@ -246,6 +247,37 @@ def _scene_xml(floor_frag: str, boxes_frag: str) -> str:
 _MODEL_CACHE: dict[int, tuple[mujoco.MjModel, list[int], list]] = {}
 
 
+def _make_surface_friction_authoritative(model: mujoco.MjModel) -> int:
+    """Raise `geom_priority` on every room and crate geom. Returns how many were changed.
+
+    Writing `geom_friction` is necessary but not sufficient. MuJoCo mixes contact parameters from
+    BOTH geoms in a pair, and for friction the mix is the element-wise MAXIMUM whenever the two
+    have equal priority. `g1_22dof.xml` declares no geom friction, so the robot's feet and hands
+    sit at MuJoCo's default of 1.0 -- above every mu this course draws (crates 0.26-0.75, the room
+    floor 0.90), so max() took the robot's value and NONE of the declared friction reached the
+    solver. Measured before this fix: crates declaring 0.265 and a floor declaring 0.900 both
+    solved at exactly 1.0000.
+
+    Raising priority on the surface side makes its contact parameters win outright, which is
+    MuJoCo's documented mechanism for exactly this case. Both families need it here, unlike
+    upstream parkour which has only static course geoms: a crate is a surface to stand on and to
+    push, and its density already sets how heavy it is, so its friction should decide how well it
+    can be shoved or mounted rather than being overwritten by the foot.
+
+    Constant per geom, so it belongs at model build; only `geom_friction` itself varies per round.
+    Gated by release CI on the SOLVED contact friction rather than on a score -- a score cannot
+    distinguish a band that applied from one that was mixed away, which is how this survived to
+    v0.1.2.
+    """
+    changed = 0
+    for gid in range(model.ngeom):
+        name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, gid) or ""
+        if name.startswith(GEOM_PREFIX) or name.startswith(BOX_PREFIX):
+            model.geom_priority[gid] = 1
+            changed += 1
+    return changed
+
+
 def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int], list]:
     """Compile (or fetch) the model for this round's box field.
 
@@ -262,6 +294,7 @@ def _round_scene(round_seed: int) -> tuple[mujoco.MjModel, list[int], list]:
     model = mujoco.MjModel.from_xml_string(xml, _mesh_assets())
     model.opt.timestep = PHYS_DT
     model.opt.density = AIR_DENSITY   # enables the fluid model opt.wind acts through
+    _make_surface_friction_authoritative(model)
     box_ids = [model.body(f"{BOX_PREFIX}{i}").id for i in range(len(boxes))]
     # N_BOXES counts the round-sampled field; the fixed leap chain (env/course._leap_chain_boxes,
     # added with the elevated finish) is emitted alongside it.
