@@ -22,16 +22,11 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# NOTE (v0.1.2): the digests below are still v0.1.1's at tag time, carried forward deliberately --
-# `apex-dev preflight` gates the release job and needs digests that already parse, and the real
-# ones only exist after the tag's run. Pinned in a follow-up commit; do not register or activate
-# 0.1.2 until that has landed.
-#
-# Pinned from the v0.1.1 release run (Actions run 34185209165, all four jobs green). Both digests
+# Pinned from the v0.1.2 release run (Actions run 34246150602, all four jobs green). Both digests
 # were cosign-verified before being written here: signature present, issuer the GitHub OIDC
 # endpoint, and the certificate SAN reading
-# `.../release.yml@refs/tags/v0.1.1` -- which matches this file's `cosign_identity` glob -- with
-# githubWorkflowSha 7928934 = v0.1.1^{commit}, so the images carry the tagged tree rather than a
+# `.../release.yml@refs/tags/v0.1.2` -- which matches this file's `cosign_identity` glob -- with
+# githubWorkflowSha 9e7ceba = v0.1.2^{commit}, so the images carry the tagged tree rather than a
 # stale one. The platform pins by digest and rejects tags.
 #
 # 0.1.2 acts on the PR-env load test (apex-mvp#452): `time_limit` is now scored on the progress
@@ -46,7 +41,7 @@ resources:
 # Both are fixed here and both are now gated in release CI. Do not activate 0.1.0 anywhere.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
-  digest: sha256:9ad869866258e0d80d6b005c39a832427e2ee66a4cec715a3d782bd6efefe31d
+  digest: sha256:13a30f727187fc7132ebd66c49fa83501c60faf8221b7da1c0c706846e49a864
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
@@ -113,7 +108,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
-    digest: sha256:ecdc6d24b9f1eb4d2fe27518bee45bd3ac43f379ac55e654c824fbc40522f563
+    digest: sha256:c46e349951f784d3caa0491f6ba499cda531037e6a324e2db81f3bee3ea2b713
   # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
   # with no grace: nothing is written and the round has no result, which the platform attributes
   # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
