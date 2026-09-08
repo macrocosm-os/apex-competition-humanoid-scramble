@@ -22,15 +22,9 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# NOTE (v0.1.3): digests below are still v0.1.2's at tag time -- preflight gates the release job
-# and needs digests that parse. Re-pinned in a follow-up; do not activate 0.1.3 until then.
-#
-# Pinned from the v0.1.2 release run (Actions run 34246150602, all four jobs green). Both digests
-# were cosign-verified before being written here: signature present, issuer the GitHub OIDC
-# endpoint, and the certificate SAN reading
-# `.../release.yml@refs/tags/v0.1.2` -- which matches this file's `cosign_identity` glob -- with
-# githubWorkflowSha 9e7ceba = v0.1.2^{commit}, so the images carry the tagged tree rather than a
-# stale one. The platform pins by digest and rejects tags.
+# Pinned from the v0.1.3 release run (Actions run 34279556215, all four jobs green), both
+# cosign-verified: SAN `.../release.yml@refs/tags/v0.1.3` against this file's identity glob,
+# GitHub OIDC issuer, githubWorkflowSha 688fc38 = v0.1.3^{commit}. The platform pins by digest.
 #
 # 0.1.3 makes declared surface friction reach the solver (geom_priority on room and crate geoms).
 # It was inert in 0.1.0-0.1.2, so crate density set mass but not grip.
@@ -47,7 +41,7 @@ resources:
 # Both are fixed here and both are now gated in release CI. Do not activate 0.1.0 anywhere.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
-  digest: sha256:13a30f727187fc7132ebd66c49fa83501c60faf8221b7da1c0c706846e49a864
+  digest: sha256:a84ed0e72a1a0dc495a1d32ad9fd4443d4548808963fedc0e250d48b48d4f4ab
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
@@ -114,7 +108,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
-    digest: sha256:c46e349951f784d3caa0491f6ba499cda531037e6a324e2db81f3bee3ea2b713
+    digest: sha256:47d4014608d86df26a1ca3b5d5a39bf4b6ab50d8c1bd433112e83b347b6cd33c
   # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
   # with no grace: nothing is written and the round has no result, which the platform attributes
   # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
