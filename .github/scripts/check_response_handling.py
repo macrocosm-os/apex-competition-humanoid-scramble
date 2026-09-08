@@ -72,6 +72,12 @@ for name, action in CASES.items():
 
 # A policy that answers legally but slowly is bounded by the suite's own clock, not by the
 # platform's hard kill: every instance is still scored and still in the denominator.
+#
+# What a time-limited instance SCORES changed 2026-09-08: it is credited with the progress it
+# made, not zeroed (env/scoring.py). This check used to assert 0.0, which was only incidentally
+# true -- the thing it exists to protect is that instances stay in the denominator and the suite
+# stays inside its own budget. Assert the scoring contract itself instead, which also pins the new
+# rule: a slow policy is still heavily penalised, because barely moving is barely any progress.
 N, BUDGET = 4, 1.0
 start = time.monotonic()
 result = play(Stub(per_call_s=0.5), instances=N, steps=3000, budget=BUDGET)
@@ -80,8 +86,13 @@ rows = result.metadata["instances"]
 limited = [r for r in rows if r["terminal_reason"] == ref.TIME_LIMIT]
 assert len(rows) == N, "instances dropped out of the denominator"
 assert limited, "a slow policy never hit the clock"
-assert all(r["score"] == 0.0 for r in limited), limited
-assert result.raw_scores[0] == sum(r["score"] for r in rows) / N
+assert all(r["score"] == r["progress"] for r in limited), limited
+assert all(r["score"] < 0.05 for r in limited), ("a stalled policy scored real progress", limited)
+# raw_score is the mean of the UNROUNDED instance scores; metadata rounds each to 4 dp, so
+# compare within that rounding rather than exactly. (Exact equality also only held while every
+# time-limited instance scored a hard 0.0.)
+assert abs(result.raw_scores[0] - sum(r["score"] for r in rows) / N) < 1e-4, (
+    result.raw_scores[0], rows)
 ceiling = BUDGET + ref.MIN_INSTANCE_BUDGET_S + 5.0
 assert elapsed < ceiling, f"suite ran {elapsed:.1f}s against a {BUDGET}s budget"
 print(f"ok: slow policy -> {len(limited)}/{N} time_limit in {elapsed:.1f}s "
