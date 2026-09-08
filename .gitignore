@@ -6,3 +6,9 @@ venv/
 .DS_Store
 /data/
 /out/
+
+# Local-only credentials. PR_CONN_STR (the throwaway PR environment's Neon DSN) lives here, and
+# this repo is public -- never let it become committable by accident.
+.env
+.env.*
+!.env.template

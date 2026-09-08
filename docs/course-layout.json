@@ -1,0 +1,232 @@
+{
+  "schema": "box-scramble.course-layout.v1",
+  "units": "metres and radians",
+  "coordinate_system": {
+    "x": "along the room, start to finish",
+    "y": "robot-left, 0 on the centreline",
+    "z": "up",
+    "deck_top_z_m": 0.8
+  },
+  "room": {
+    "length_m": 48.0,
+    "full_width_m": 6.0,
+    "half_width_m": 3.0,
+    "apron_len_m": 8.0,
+    "field_len_m": 37.0,
+    "dash_len_m": 3.0
+  },
+  "start": {
+    "position_m": [
+      -0.8,
+      0.0,
+      0.8
+    ],
+    "yaw_rad": 0.0
+  },
+  "finish": {
+    "x_m": 48.0,
+    "platform_top_z_m": 2.4,
+    "rise_above_deck_m": 1.6
+  },
+  "zones": [
+    {
+      "id": "scramble",
+      "x0_m": 8.0,
+      "length_m": 37.0,
+      "boxes": 100,
+      "rgba": [
+        0.85,
+        0.55,
+        0.2,
+        1.0
+      ]
+    },
+    {
+      "id": "push",
+      "x0_m": 8.0,
+      "length_m": 37.0,
+      "boxes": 60,
+      "rgba": [
+        0.35,
+        0.7,
+        0.95,
+        1.0
+      ]
+    },
+    {
+      "id": "climb",
+      "x0_m": 24.0,
+      "length_m": 21.0,
+      "boxes": 36,
+      "rgba": [
+        0.7,
+        0.25,
+        0.2,
+        1.0
+      ]
+    }
+  ],
+  "surfaces": [
+    {
+      "shape": "box",
+      "kind": "apron",
+      "supports_robot": true,
+      "center_m": [
+        4.0,
+        0.0,
+        0.6
+      ],
+      "size_m": [
+        8.0,
+        6.0,
+        0.4
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.55,
+        0.57,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "shape": "box",
+      "kind": "apron",
+      "supports_robot": true,
+      "center_m": [
+        26.5,
+        0.0,
+        0.6
+      ],
+      "size_m": [
+        37.0,
+        6.0,
+        0.4
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.55,
+        0.57,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "shape": "box",
+      "kind": "dash",
+      "supports_robot": true,
+      "center_m": [
+        46.0,
+        0.0,
+        0.6
+      ],
+      "size_m": [
+        2.0,
+        6.0,
+        0.4
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.55,
+        0.57,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "shape": "box",
+      "kind": "dash",
+      "supports_robot": true,
+      "center_m": [
+        47.5,
+        0.0,
+        2.2
+      ],
+      "size_m": [
+        1.0,
+        6.0,
+        0.4
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.55,
+        0.57,
+        0.6,
+        1.0
+      ]
+    },
+    {
+      "shape": "box",
+      "kind": "leap",
+      "supports_robot": true,
+      "center_m": [
+        42.75,
+        0.0,
+        1.35
+      ],
+      "size_m": [
+        0.84,
+        0.12,
+        1.1
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.7,
+        0.25,
+        0.2,
+        1.0
+      ]
+    },
+    {
+      "shape": "box",
+      "kind": "leap",
+      "supports_robot": true,
+      "center_m": [
+        44.64,
+        0.0,
+        1.35
+      ],
+      "size_m": [
+        0.84,
+        0.12,
+        1.1
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.7,
+        0.25,
+        0.2,
+        1.0
+      ]
+    },
+    {
+      "shape": "box",
+      "kind": "leap",
+      "supports_robot": true,
+      "center_m": [
+        46.53,
+        0.0,
+        1.35
+      ],
+      "size_m": [
+        0.84,
+        0.12,
+        1.1
+      ],
+      "yaw_rad": 0.0,
+      "rgba": [
+        0.7,
+        0.25,
+        0.2,
+        1.0
+      ]
+    }
+  ],
+  "box_field": {
+    "static": false,
+    "sampled_per_round": true,
+    "count": 196,
+    "source": "per-instance history record: conditions.box_field and frames.boxes",
+    "note": "Drawn from the round seed inside the referee. Not derivable from this file."
+  }
+}

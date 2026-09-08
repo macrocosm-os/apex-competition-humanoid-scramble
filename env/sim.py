@@ -40,7 +40,9 @@ Termination gates (each maps to a terminal_reason the miner sees post-round):
     physics_glitch  NaN/Inf state or |qvel| > 100 -- the run left the physical regime the room
                     is defined in, so it is not a crossing of it
     timeout         max_steps control steps elapsed
-    time_limit      the evaluation's wall-clock budget ran out on this instance (referee-side,
+    time_limit      the evaluation's wall-clock budget ran out on this instance -- scored on
+                    progress, not zeroed, since it is the platform's clock and not the
+                    submission's doing (referee-side,
                     see referee/referee.py)
 
 ELEVATED FINISH (2026-08-18, Amy/Crux): completion used to be x-position only, which meant a

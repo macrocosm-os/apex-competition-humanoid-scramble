@@ -16,14 +16,14 @@
       "type": "integer",
       "minimum": 1,
       "maximum": 64,
-      "description": "Evaluation instances. Every instance in a round shares the identical box field; only wind varies between them, so this sets how well the suite covers the wind range and how much score noise the round carries -- inherited starting point from upstream parkour (24), NOT yet re-measured for this course's own score variance (see docs/design.md and HANDOFF.md SS4 before onboarding)."
+      "description": "Evaluation instances. Every instance in a round shares the identical box field; only wind varies between them, so this sets how well the suite covers the wind range, not how many box fields are sampled. MEASURED 2026-09-08 in a PR environment (apex-mvp#452): the inherited 24 does NOT fit. A control step costs ~29 ms under concurrency, so 24 instances share 780 s at ~32.5 s each = ~1100 steps, and 43.7% of instances ended `time_limit`. 12 x 2000 costs ~700 s and fits with headroom; 8 instances is the most that can reach a full 3000 steps. Cutting instances is cheap here because they share one box field, so round variance is dominated by that single draw and does not fall as sqrt(N)."
     },
     "max_steps_per_episode": {
       "type": "integer",
       "minimum": 100,
       "maximum": 3000,
       "default": 3000,
-      "description": "Control-step cap per instance (1 step = 20 ms sim time, so 3000 = 60 s). Inherited from upstream parkour's wall-clock sizing against a 900 s referee timeout; RE-MEASURE before onboarding, since box contact dynamics (196 free bodies) cost more per physics step than parkour's static geometry did. The referee's own time budget (`time_budget_s`) is what actually bounds the suite; this bounds one instance's simulated length."
+      "description": "Control-step cap per instance (1 step = 20 ms sim time, so 2000 = 40 s). MEASURED 2026-09-08 (apex-mvp#452): the inherited 3000 is unreachable in practice -- at ~29 ms per control step under concurrency, 24 instances sharing a 780 s budget get ~1100 steps each, so the cap advertised was never the cap applied. Either keep this at/below what `time_budget_s / num_instances` actually buys, or cut num_instances. The referee's time budget is what really bounds the suite; this bounds one instance's simulated length."
     },
     "deadline_ms": {
       "type": "integer",
@@ -53,7 +53,7 @@
       "minimum": 30,
       "maximum": 3000,
       "default": 780,
-      "description": "Wall-clock seconds the whole instance suite may take, shared out equally across the instances still to run. An instance that reaches its share ends as `time_limit` and scores as a run that crossed no room; instances the budget never reached end the same way and stay in the mean. Must sit comfortably below `referee.timeout_s` in spec.yaml, which is a hard kill with no grace period. Default 780 (env referee DEFAULT_SUITE_BUDGET_S) against a 900 s referee timeout."
+      "description": "Wall-clock seconds the whole instance suite may take, shared across the instances still to run (each gets `remaining / instances left`, so slack flows forward). An instance that reaches its share ends `time_limit` and is scored on the progress it made -- changed 2026-09-08, because zeroing it let contention decide the score and penalised the runs that lasted longest. Instances the budget never reached still score 0.0: no progress. Must sit comfortably below `referee.timeout_s` (900) in spec.yaml, which is a hard kill with no grace and no result. Leave real headroom: at 780 s, 3 of 50 load-test submissions still hit the kill and returned `referee_error`, because sandbox start and image pull are outside this budget but inside that timeout. Default 780 (env referee DEFAULT_SUITE_BUDGET_S); 700 is the measured-safe value for a 12 x 2000 round."
     }
   }
 }

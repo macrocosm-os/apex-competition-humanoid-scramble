@@ -86,8 +86,8 @@ Upstream's scoring, plus the evaluation's time budget (`time_limit`, below):
 | Outcome | Score |
 |---|---|
 | completed | `1.0 + (max_steps - steps) / max_steps` → (1.0, 2.0] |
-| fell / timeout / out_of_bounds | `progress`, the fraction of the room crossed → [0.0, 1.0) |
-| physics_glitch / time_limit / invalid / player error | 0.0 |
+| fell / timeout / out_of_bounds / time_limit | `progress`, the fraction of the room crossed → [0.0, 1.0) |
+| physics_glitch / invalid / player error | 0.0 |
 
 `raw_score` is the mean over the instances. Progress is continuous along the room regardless of
 which zone a robot is in, so a policy that gets 2 m further into the scramble field scores 2 m
@@ -99,6 +99,12 @@ under: the step cap (`max_steps_per_episode`) and the evaluation's wall-clock bu
 share of the clock ends as `time_limit`, and instances the budget never reached end the same way —
 they stay in the mean either way, so the score is always the average over the full suite. Answering
 each `/act` well inside `deadline_ms` is therefore part of the task, not just a limit on it.
+
+`time_limit` is scored on the progress the run made, not zeroed (changed 2026-09-08). It is the one
+terminal reason a submission does not cause — it means the referee's clock ran out, which depends
+on what else was sharing the machine. Zeroing it made contention decide the score, and hit the best
+runs hardest, since a policy that survives longer is the one that eats the clock. An instance the
+budget never reached still scores 0.0: it made no progress.
 
 ## What varies per round, and what does not
 
