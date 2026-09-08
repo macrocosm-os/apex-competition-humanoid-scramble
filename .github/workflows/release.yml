@@ -231,6 +231,54 @@ jobs:
           PY
           PYTHONPATH=. python .github/scripts/check_replay_roundtrip.py /tmp/history 2
 
+      # History is delivered to the miner and rendered by the dashboard, so its SIZE is a
+      # contract too. /1 wrote all 196 box free joints every frame: the PR-env load test stored
+      # 4.9 GB for 55 submissions, ~119 MB each, single files up to 11 MB. /2 records the robot
+      # plus only the boxes that moved. Assert both halves of that -- it stays small, and what it
+      # drops really was motionless.
+      - name: History records the robot and only the boxes that moved
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import numpy as np
+          from env import ParkourSim, instance_spec
+          from env.history import (DEFAULT_STRIDE, MOVED_EPS, InstanceRecorder,
+                                   reconstruct_qpos)
+          from env.sim import ACT_DIM
+
+          sim = ParkourSim(instance_spec(0, 24, 1)); sim.reset()
+          rec = InstanceRecorder(0, sim, DEFAULT_STRIDE)
+          reason = None
+          while reason is None:
+              reason = sim.step(np.zeros(ACT_DIM), max_steps=400).terminal_reason
+              rec.capture(sim, np.zeros(ACT_DIM))
+          truth = np.asarray(rec._qpos, np.float32)
+          record = rec.record(sim, {"terminal_reason": reason, "steps": sim.steps})
+
+          frames = record["frames"]
+          nq_robot, nq_model = frames["nq"], frames["nq_model"]
+          assert nq_robot == 7 + ACT_DIM, (nq_robot, ACT_DIM)
+          assert nq_model > nq_robot, (nq_model, nq_robot)
+
+          got = reconstruct_qpos(record)
+          assert got.shape == truth.shape, (got.shape, truth.shape)
+          n_boxes = (nq_model - nq_robot) // 7
+          moved = set(record["frames"]["boxes"]["indices"])
+          assert np.array_equal(got[:, :nq_robot], truth[:, :nq_robot]), "robot qpos is not exact"
+          tb = truth[:, nq_robot:].reshape(-1, n_boxes, 7)
+          gb = got[:, nq_robot:].reshape(-1, n_boxes, 7)
+          for i in moved:
+              assert np.array_equal(gb[:, i], tb[:, i]), f"moved box {i} is not exact"
+          for i in set(range(n_boxes)) - moved:
+              drift = float(np.linalg.norm(gb[:, i, :3] - tb[:, i, :3], axis=1).max())
+              assert drift < MOVED_EPS, f"box {i} dropped but drifted {drift:.4f} m"
+
+          naive = truth.size
+          kept = got.shape[0] * nq_robot + got.shape[0] * len(moved) * 7 + n_boxes * 7
+          assert kept < naive / 2, f"compaction kept {kept}/{naive} floats -- no better than /1"
+          print(f"ok: {len(moved)}/{n_boxes} boxes recorded, {100*kept/naive:.0f}% of /1's floats, "
+                f"robot and moved boxes exact, dropped boxes under {MOVED_EPS} m")
+          PY
+
       # Both miner-facing artifacts, plus the guarantee that failing to write one cannot turn a
       # scored round into a zero. No containers: the script drives the real referee against the
       # real player.

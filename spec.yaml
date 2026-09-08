@@ -1,6 +1,6 @@
 schema: apex.competition.v1
 id: box_scramble
-version: 0.1.1
+version: 0.1.2
 display_name: "Box Scramble"
 kind: solo
 process_type: cpu
@@ -22,12 +22,22 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
+# NOTE (v0.1.2): the digests below are still v0.1.1's at tag time, carried forward deliberately --
+# `apex-dev preflight` gates the release job and needs digests that already parse, and the real
+# ones only exist after the tag's run. Pinned in a follow-up commit; do not register or activate
+# 0.1.2 until that has landed.
+#
 # Pinned from the v0.1.1 release run (Actions run 34185209165, all four jobs green). Both digests
 # were cosign-verified before being written here: signature present, issuer the GitHub OIDC
 # endpoint, and the certificate SAN reading
 # `.../release.yml@refs/tags/v0.1.1` -- which matches this file's `cosign_identity` glob -- with
 # githubWorkflowSha 7928934 = v0.1.1^{commit}, so the images carry the tagged tree rather than a
 # stale one. The platform pins by digest and rejects tags.
+#
+# 0.1.2 acts on the PR-env load test (apex-mvp#452): `time_limit` is now scored on the progress
+# the run made rather than zeroed, history records the robot plus only the boxes that moved
+# (~119 MB -> ~20 MB per submission), and the round input is re-sized to something that fits its
+# own budget. See the release notes; the round input lives in the competition row, not here.
 #
 # 0.1.1 is the first version that can score at all. 0.1.0's PD loop drove all 22 actuators from
 # the wrong joint's state (data.ctrl is in actuator order, qpos/qvel in body-tree order, and

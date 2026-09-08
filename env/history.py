@@ -30,9 +30,23 @@ import numpy as np
 from .sim import FRAME_SKIP, PHYS_DT
 
 # Bump the minor half when adding keys a reader can ignore, the major half when it cannot.
-# box_scramble/1 replaces the inherited humanoid_parkour_history/1: `conditions` now carries the
+# box_scramble/1 replaced the inherited humanoid_parkour_history/1: `conditions` now carries the
 # box field (see the module docstring), which a replay cannot ignore -- it is the scene.
-FORMAT = "box_scramble_history/1"
+#
+# /2 (2026-09-08) splits `frames.qpos` into the robot's own qpos plus `frames.boxes`, which
+# carries ONLY the boxes that actually moved. /1 wrote the whole model's qpos every frame -- 1422
+# floats, of which 1372 were 196 box free joints that mostly never move. Measured over the PR-env
+# load test (apex-mvp#452): 4.9 GB of history for 55 submissions, ~119 MB per submission, single
+# instance files up to 11 MB, against parkour's ~50 KB. In a typical instance 30 of 199 boxes move
+# more than a millimetre and 6 move more than a centimetre, so the robot plus the movers is ~17%
+# of what /1 wrote. A reader fills every box in from `frames.boxes.rest` and animates the indices
+# in `frames.boxes` over it -- see reconstruct_qpos(), which does exactly that.
+FORMAT = "box_scramble_history/2"
+
+# A box counts as moved if its centre shifts at least this far, in metres, at any recorded frame.
+# Well below the smallest box half-extent, so a box that is genuinely nudged is always kept and
+# solver jitter on a resting stack is not.
+MOVED_EPS = 1e-3
 
 # Fields of one recorded box, in this order, packed as a float32 (N_BOXES, 8) array. Zones are
 # stored separately as a plain list of strings: they are labels, not numbers.
@@ -67,6 +81,39 @@ def unpack(d: dict[str, Any]) -> np.ndarray:
         raise ValueError(f"unexpected dtype {dtype!r} in history file")
     raw = base64.b64decode(d["b64"])
     return np.frombuffer(raw, dtype=np.dtype(dtype)).reshape([int(x) for x in d["shape"]])
+
+
+def reconstruct_qpos(record: dict[str, Any]) -> np.ndarray:
+    """The full model qpos per frame, (frames, nq_model), as MuJoCo would set it.
+
+    /2 records the robot's qpos plus only the boxes that moved, so the scene has to be rebuilt:
+    every box starts at its `frames.boxes.rest` pose and stays there unless it appears in
+    `frames.boxes.indices`. /1 files carried the whole model's qpos and are returned unchanged.
+
+    Exact for the robot and for every box that moved; a box that did not move is placed at its
+    frame-0 pose, so its error is its own drift and is below MOVED_EPS by construction.
+    """
+    frames = record["frames"]
+    qpos = unpack(frames["qpos"])
+    moved = frames.get("boxes")
+    if moved is None:                      # box_scramble_history/1
+        return qpos
+
+    rest = unpack(moved["rest"])
+    n_frames, nq_robot = qpos.shape
+    full = np.zeros((n_frames, nq_robot + 7 * len(rest)), np.float32)
+    full[:, :nq_robot] = qpos
+    full[:, nq_robot:] = np.tile(rest.reshape(1, -1), (n_frames, 1))
+    idx = [int(i) for i in moved["indices"]]
+    if idx:
+        poses = unpack(moved["qpos"])
+        if poses.shape != (n_frames, len(idx), 7):
+            raise ValueError(f"frames.boxes.qpos {poses.shape} does not match "
+                             f"{n_frames} frames x {len(idx)} moved boxes")
+        for k, i in enumerate(idx):
+            j = nq_robot + 7 * i
+            full[:, j:j + 7] = poses[:, k, :]
+    return full
 
 
 def pack_boxes(boxes: list[Any]) -> dict[str, Any]:
@@ -115,6 +162,10 @@ class InstanceRecorder:
         self._action: list[np.ndarray] = []
         self._ticks: list[int] = []
         self._nq = int(sim.model.nq)
+        # The robot is the first body, so its qpos is the leading slice and the box free joints
+        # (7 each) follow. Derived from the model rather than hardcoded, so this keeps working if
+        # the robot's DoF count changes again.
+        self._nq_robot = int(sim.model.nq) - 7 * len(sim.boxes)
         self._params = sim.params
         # The field this instance ran against, captured once: it is fixed for the whole round, so
         # recording it per instance costs ~6 KB and makes every file independently replayable.
@@ -156,18 +207,49 @@ class InstanceRecorder:
                        "control_dt": PHYS_DT * FRAME_SKIP, "stride": self.stride},
             "frames": {
                 "count": len(self._ticks),
-                "nq": self._nq,
+                # The ROBOT's qpos width, not the model's -- see `nq_model` below and FORMAT.
+                "nq": self._nq_robot,
+                "nq_model": self._nq,
                 # Control step each frame was captured at; frame 0 is the pre-step pose.
                 "ticks": pack(np.asarray(self._ticks, np.int32)),
                 # Position only. No qvel, so a replay can show the motion but not contact forces,
                 # which need the full state to recompute. Add it here if that changes.
-                "qpos": pack(np.asarray(self._qpos, np.float32)),
+                "qpos": pack(np.asarray(self._qpos, np.float32)[:, :self._nq_robot]),
+                "boxes": self._moved_boxes(),
                 # Aligned with ticks. Frame 0 and the terminal frame carry zeros — no action
                 # produced them.
                 "action": pack(np.asarray(self._action, np.float32)),
             },
             "mujoco_version": _mujoco_version(),
         }
+
+    def _moved_boxes(self) -> dict[str, Any]:
+        """Per-frame pose for the boxes that moved, and nothing for the ones that did not.
+
+        Returns {rest, indices, qpos}: `rest` is every box's (n_boxes, 7) pose at frame 0,
+        `indices` are box numbers into it, and `qpos` is (frames, len(indices), 7) free-joint
+        poses aligned with `frames.ticks`. A box absent from `indices` never moved: render it at
+        its `rest` pose for the whole run.
+
+        `rest` is recorded rather than derived from `conditions.box_field` because the two are not
+        the same number: `boxes_xml_fragment` writes positions with %.3f, so what MuJoCo compiled
+        is the box field rounded to a millimetre. Deriving the rest pose from the field therefore
+        put a systematic sub-millimetre offset on every un-recorded box, on top of that box's own
+        drift. Recording frame 0 costs ~5.6 KB and makes the reconstruction exact for every box
+        that did not move, so the only error left is bounded by MOVED_EPS by construction.
+        """
+        frames = np.asarray(self._qpos, np.float32)
+        boxes = frames[:, self._nq_robot:]
+        n_boxes = boxes.shape[1] // 7
+        if n_boxes == 0:
+            return {"rest": pack(np.zeros((0, 7), np.float32)), "indices": [],
+                    "qpos": pack(np.zeros((len(frames), 0, 7), np.float32))}
+        boxes = boxes.reshape(len(frames), n_boxes, 7)
+        shift = np.linalg.norm(boxes[:, :, :3] - boxes[0:1, :, :3], axis=2).max(axis=0)
+        idx = np.flatnonzero(shift >= MOVED_EPS)
+        return {"rest": pack(np.ascontiguousarray(boxes[0])),
+                "indices": [int(i) for i in idx],
+                "qpos": pack(np.ascontiguousarray(boxes[:, idx, :]))}
 
     def _append(self, sim, action) -> None:
         self._qpos.append(np.asarray(sim.data.qpos, np.float32))

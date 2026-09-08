@@ -31,7 +31,7 @@ import time
 import mujoco
 
 from env.course import ROOM_LENGTH
-from env.history import boxes_from_record, read_all, unpack
+from env.history import boxes_from_record, read_all, reconstruct_qpos, unpack
 from tools.preview import OUT, _camera, _lit_model_for_boxes, frames_dir, mp4, png
 
 TARGET_FPS = 30.0
@@ -45,7 +45,9 @@ class Run:
         self.index = int(record["instance"])
         self.outcome = record.get("outcome", {})
         frames = record["frames"]
-        self.qpos = unpack(frames["qpos"])
+        # Full model qpos, rebuilt from the robot's frames plus the boxes that moved -- see
+        # env/history.reconstruct_qpos. Downstream code sets data.qpos from this directly.
+        self.qpos = reconstruct_qpos(record)
         self.ticks = unpack(frames["ticks"])
         self.action = unpack(frames["action"])
         self.boxes = boxes_from_record(record)

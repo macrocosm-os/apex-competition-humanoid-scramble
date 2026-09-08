@@ -19,8 +19,8 @@ within one round faces the identical box layout. What the metadata and the histo
 the conditions each instance faced, not the seed the round was drawn with.
 
 The suite runs under a wall-clock budget as well as a step cap: every instance gets a share of it,
-and an instance that runs out of clock ends as `time_limit` and scores as a run that did not cross
-the room. The budget is what keeps the suite inside `referee.timeout_s` regardless of how long a
+and an instance that runs out of clock ends as `time_limit`, scored on the progress it made (it is
+the platform's clock, not the submission's failure -- see env/scoring.py). The budget is what keeps the suite inside `referee.timeout_s` regardless of how long a
 policy takes to answer.
 """
 
@@ -53,8 +53,8 @@ DEFAULT_DEADLINE_MS = 500
 # `referee.timeout_s` in spec.yaml is a hard kill with no grace: whatever is unwritten at that
 # moment is lost, and the round has no result. So the suite runs to its own budget, comfortably
 # inside that, and every instance gets an equal share of what is left when it starts. An instance
-# that reaches its share ends as `time_limit` (env/scoring.py scores it as a run that crossed no
-# room); once the whole budget is gone the remaining instances end the same way, in the
+# that reaches its share ends as `time_limit` (env/scoring.py scores it on the progress it made);
+# once the whole budget is gone the remaining instances end the same way, in the
 # denominator, so the score is always the mean over the full suite.
 DEFAULT_SUITE_BUDGET_S = 780.0
 # Floor on one instance's share, so a large num_instances cannot slice the budget so thin that
