@@ -11,6 +11,13 @@ until/unless someone explicitly asks for one again -- if that happens, this file
 rewrite (new obs indices for the 136-dim layout, a policy architecture that actually has arm
 outputs since motion.pt has none, since Unitree's own stock walker doesn't drive arms either).
 
+2026-09-07: that rewrite now exists as tools/make_walker22.py -- same motion.pt legs, arms held
+at the default pose, 136-obs indices. It is deliberately NOT a baseline: it exists so the
+evaluation loop can be exercised at full episode length (the load test needs a policy that
+survives, not one that falls in 200 steps), and spec.defaults.baseline_raw_score stays 0.0 by
+choice. baseline/baseline.onnx and its PROVENANCE.md still describe the upstream 12-DoF artifact
+and are still not loadable by this competition's player.
+
 Original (pre-arms) docstring, kept for whoever revisits this:
 
 The baseline is not trained for this course — it is Unitree's flat-ground `motion.pt` wrapped so
