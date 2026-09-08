@@ -22,22 +22,21 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# NOTE (v0.1.1): the digests below are still v0.1.0's at tag time, carried forward deliberately.
-# `apex-dev preflight` gates the release job and validates image.digest against
-# ^sha256:[a-f0-9]{64}$, so a version bump has to tag with digests that already parse; the real
-# v0.1.1 digests only exist once the tag's run has built and signed them, and are pinned in a
-# follow-up commit. Do NOT register or activate 0.1.1 in the registry until that has happened --
-# these digests resolve to the v0.1.0 images, which cannot score (see the release notes).
-#
-# Pinned from the v0.1.0 release run (Actions run 32427533677, all four jobs green). Both digests
+# Pinned from the v0.1.1 release run (Actions run 34185209165, all four jobs green). Both digests
 # were cosign-verified before being written here: signature present, issuer the GitHub OIDC
 # endpoint, and the certificate SAN reading
-# `.../release.yml@refs/tags/v0.1.0` -- which matches this file's `cosign_identity` glob -- with
-# githubWorkflowSha c10c15b = v0.1.0^{commit}, so the images carry the tagged tree rather than a
+# `.../release.yml@refs/tags/v0.1.1` -- which matches this file's `cosign_identity` glob -- with
+# githubWorkflowSha 7928934 = v0.1.1^{commit}, so the images carry the tagged tree rather than a
 # stale one. The platform pins by digest and rejects tags.
+#
+# 0.1.1 is the first version that can score at all. 0.1.0's PD loop drove all 22 actuators from
+# the wrong joint's state (data.ctrl is in actuator order, qpos/qvel in body-tree order, and
+# g1_22dof.xml declares the arm chain before the legs), so the robot left the physical regime
+# within ~5 control steps; and 29-31 of its 196 boxes spawned interpenetrating by up to 0.58 m.
+# Both are fixed here and both are now gated in release CI. Do not activate 0.1.0 anywhere.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
-  digest: sha256:45d8bd910b1cd69afdc64912de18602c1b006e658b38340cc1bb7970e37769e9
+  digest: sha256:9ad869866258e0d80d6b005c39a832427e2ee66a4cec715a3d782bd6efefe31d
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
@@ -104,7 +103,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
-    digest: sha256:d726bc65972a1bf26b0e83cfd7fa95794a6be960611c0809dba1609bc40532b6
+    digest: sha256:ecdc6d24b9f1eb4d2fe27518bee45bd3ac43f379ac55e654c824fbc40522f563
   # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
   # with no grace: nothing is written and the round has no result, which the platform attributes
   # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
