@@ -1,6 +1,6 @@
 schema: apex.competition.v1
 id: box_scramble
-version: 0.1.0
+version: 0.1.1
 display_name: "Box Scramble"
 kind: solo
 process_type: cpu
@@ -21,6 +21,13 @@ resources:
 # Built, pushed, and keyless-cosign-signed by this repo's release workflow (see
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
+#
+# NOTE (v0.1.1): the digests below are still v0.1.0's at tag time, carried forward deliberately.
+# `apex-dev preflight` gates the release job and validates image.digest against
+# ^sha256:[a-f0-9]{64}$, so a version bump has to tag with digests that already parse; the real
+# v0.1.1 digests only exist once the tag's run has built and signed them, and are pinned in a
+# follow-up commit. Do NOT register or activate 0.1.1 in the registry until that has happened --
+# these digests resolve to the v0.1.0 images, which cannot score (see the release notes).
 #
 # Pinned from the v0.1.0 release run (Actions run 32427533677, all four jobs green). Both digests
 # were cosign-verified before being written here: signature present, issuer the GitHub OIDC

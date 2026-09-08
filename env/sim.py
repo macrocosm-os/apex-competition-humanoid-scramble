@@ -289,6 +289,21 @@ class ParkourSim:
         self._ray_mask = np.zeros(6, np.uint8)
         self._ray_mask[WORLD_GROUP] = 1
         self._geomid = np.zeros(1, np.int32)
+        # Actuator order is NOT dof order. The <actuator> block lists legs first, but MuJoCo
+        # numbers joints by the body tree, and g1_22dof.xml declares the torso/arm chain before
+        # the legs -- so qpos[7:29] is arms-then-legs while ctrl/KP/KD/DEFAULT_ANGLES are
+        # legs-then-arms. Indexing state by a flat slice pairs every actuator with a different
+        # joint's error, which is a positive feedback loop, not a control law. Resolve the two
+        # orders explicitly and index through these. (Upstream parkour's 12-DoF model has no arm
+        # chain, so the orders coincide there and a flat slice happened to be correct.)
+        trn = self.model.actuator_trnid[:, 0]
+        self._qadr = self.model.jnt_qposadr[trn]
+        self._vadr = self.model.jnt_dofadr[trn]
+        # The robot is the first body, so its state occupies the leading qpos/qvel entries; the
+        # box free joints follow. Derived rather than hardcoded -- the old literals were 12-DoF
+        # leftovers that left ten arm joints out of the reset noise.
+        self._nq_robot = 7 + self.model.nu
+        self._nv_robot = 6 + self.model.nu
         self.steps = 0
         self.max_x = START_X
         self._action = np.zeros(ACT_DIM)
@@ -299,13 +314,14 @@ class ParkourSim:
         rng = np.random.default_rng([self._seed, 0xBADA55])
         self.data.qpos[0] = START_X
         self.data.qpos[2] = PLINTH_TOP + 0.793
-        self.data.qpos[7:29] = DEFAULT_ANGLES   # 22 actuated DoF now (was 12 -- legs only)
-        # Robot qpos is [0:19] (free joint 7 + 12 leg angles); box free joints follow at [19:].
+        self.data.qpos[self._qadr] = DEFAULT_ANGLES   # actuator order -> each joint's own address
+        # Robot qpos is [0:_nq_robot] (free joint 7 + 22 joint angles); box free joints follow.
         # mj_resetData already sets every box to its compiled resting pose (qpos0), so nothing
         # box-related needs setting here -- only the robot's own noise is added, and only over
         # the robot's own qpos/qvel slice, so reset noise never nudges a box off its rest pose.
-        self.data.qpos[:19] += rng.uniform(-RESET_NOISE, RESET_NOISE, 19)
-        self.data.qvel[:18] += rng.uniform(-RESET_NOISE, RESET_NOISE, 18)
+        nq, nv = self._nq_robot, self._nv_robot
+        self.data.qpos[:nq] += rng.uniform(-RESET_NOISE, RESET_NOISE, nq)
+        self.data.qvel[:nv] += rng.uniform(-RESET_NOISE, RESET_NOISE, nv)
         mujoco.mj_forward(self.model, self.data)
         self.steps = 0
         self.max_x = START_X
@@ -322,7 +338,8 @@ class ParkourSim:
         self._action = np.clip(a, -10.0, 10.0)
         target = self._action * ACTION_SCALE + DEFAULT_ANGLES
         for _ in range(FRAME_SKIP):
-            self.data.ctrl[:] = (target - self.data.qpos[7:29]) * KP - self.data.qvel[6:28] * KD
+            self.data.ctrl[:] = ((target - self.data.qpos[self._qadr]) * KP
+                                 - self.data.qvel[self._vadr] * KD)
             mujoco.mj_step(self.model, self.data)
         self.steps += 1
         self.max_x = max(self.max_x, float(self.data.qpos[0]))
@@ -381,8 +398,8 @@ class ParkourSim:
         # Arm proprioception (2026-08-18, added alongside arm actuation): joint angles/velocities
         # for all 22 actuated DoF now (was 12), so the policy can feel where its hands/elbows are,
         # not just its legs -- without this the arms would be fully actuatable but flying blind.
-        arm_leg_angles = d.qpos[7:29] - DEFAULT_ANGLES        # 22 values (12 leg + 10 arm)
-        arm_leg_vel = d.qvel[6:28] * 0.05                      # 22 values
+        arm_leg_angles = d.qpos[self._qadr] - DEFAULT_ANGLES   # 22 values (12 leg + 10 arm)
+        arm_leg_vel = d.qvel[self._vadr] * 0.05                # 22 values
 
         # Hand-proximity channels (2026-08-18, added alongside arm actuation): the height scan
         # tells a policy what the TERRAIN looks like, but pushing/lifting needs to know what's

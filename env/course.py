@@ -253,7 +253,128 @@ def _friction_band(density: float) -> tuple[float, float]:
 # that rare fallback case is a soft degradation (two boxes touching/interpenetrating slightly),
 # not a broken course, and is intentionally the worst case rather than the common one.
 OVERLAP_MARGIN = 0.06            # metres of clearance required between any two box footprints
-MAX_PLACEMENT_ATTEMPTS = 60       # retries before falling back to the last candidate position
+MAX_PLACEMENT_ATTEMPTS = 300      # random draws before switching to the deterministic sweep
+FALLBACK_Y_STEPS = 61             # sweep resolution across the room's width (10 cm at 6 m)
+FALLBACK_X_SPAN = 1.2             # metres either side of the intended x the sweep may borrow
+FALLBACK_X_STEPS = 25             # ~10 cm steps across that span
+
+# 2026-09-07: the "rare fallback" assumption above was wrong, and it was not rare. Measured over
+# seeds 1/2/7, 29-31 of 196 boxes (~15%) exhausted all 60 attempts and were placed at their last
+# tried -- overlapping -- position, leaving 34-42 interpenetrating pairs per round with
+# penetrations up to 0.58 m. MuJoCo then resolves that on the first steps by throwing the field
+# apart, which is not the course anyone designed.
+#
+# It is not a space problem: fill is only 34-38%. It is that scramble confines each box to a
+# 0.22 m x-slice (100 boxes over 22 m) with +-0.066 m of jitter while the boxes are ~0.42 m wide,
+# so a box overlaps its neighbours' slices in x and can only escape in y -- where it draws from
+# just 5 discrete lanes. Roughly five consecutive boxes therefore compete for five lanes, and
+# hitting the one free lane by random draw inside 60 tries often fails.
+#
+# Fixed by never accepting an overlapping position: when random sampling jams, sweep y
+# deterministically at the box's own x and take the first slot that clears. The sweep is visited
+# in a seeded random ORDER, not low-to-high, so the boxes it places are not biased toward one
+# edge of the room the way a monotonic scan would make them.
+
+
+def _yaw_footprint(b: "Box") -> tuple[float, float]:
+    """Half-extents of a box's axis-aligned bounding footprint, accounting for its yaw. The
+    placement registry ignores yaw by design ("good enough"), but scramble draws up to +-0.4 rad,
+    which grows a 0.42 m box's footprint by ~6 cm a side -- the same order as OVERLAP_MARGIN, so
+    the repair pass below uses the real rotated extent rather than inheriting the approximation."""
+    c, s = abs(np.cos(b.yaw)), abs(np.sin(b.yaw))
+    return b.hx * c + b.hy * s, b.hx * s + b.hy * c
+
+
+def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[int],
+                     rounds: int = 12) -> list["Box"]:
+    """Relocate the few boxes that still overlap after sampling, and return the repaired field.
+
+    Each sampler keeps its own footprint registry and each registers something slightly
+    different from the geometry it finally emits -- climb registers a stack centre while its
+    tiers carry their own jitter, the registry ignores yaw, and a jammed placement is allowed to
+    keep its last candidate. Patching every one of those individually kept leaving a handful of
+    overlaps, so this closes them all at once by working on the REAL emitted geometry instead of
+    on any registry.
+
+    Only scramble and push boxes are moved. Climb boxes are load-bearing structure -- tiers of a
+    stack must stay stacked, and the finish depends on the climb field being climbable -- so a
+    climb/scramble overlap is resolved by moving the scramble box. Boxes keep their size, height
+    and z, so a relocated box still rests on the floor exactly as sampled."""
+    movable = {"scramble", "push"}
+
+    def group_of(idx: int) -> list[int]:
+        """Indices that must move together. Clutter moves alone; a climb stack moves whole, or
+        its tiers would be left hanging in mid-air. `pinned` is the leap chain -- labelled
+        "climb" like the stacks, and the elevated finish depends on it being exactly where it is,
+        so it never moves. It is passed in by index rather than detected by position: climb's
+        overflow slots and this pass itself can both put a genuine stack past the field's nominal
+        end, and a positional test then mistook that stack for the chain and refused to move it."""
+        if idx in pinned:
+            return []
+        box = boxes[idx]
+        if box.zone in movable:
+            return [idx]
+        return [k for k, o in enumerate(boxes)
+                if k not in pinned and o.zone == box.zone
+                and abs(o.cx - box.cx) < 0.2 and abs(o.cy - box.cy) < 0.2]
+
+    def footprint_of(group: list[int]) -> tuple[float, float]:
+        fs = [_yaw_footprint(boxes[k]) for k in group]
+        return max(f[0] for f in fs), max(f[1] for f in fs)
+
+    for _ in range(rounds):
+        pairs = overlapping_pairs(boxes)
+        if not pairs:
+            break
+        # Deepest first, and move the smaller of the two groups: a big climb stack should
+        # displace clutter rather than the other way round.
+        for i, j, _pen in sorted(pairs, key=lambda t: t[2], reverse=True):
+            gi, gj = group_of(i), group_of(j)
+            cands = [g for g in (gi, gj) if g]
+            if not cands:
+                continue
+            group = min(cands, key=lambda g: max(boxes[k].hx * boxes[k].hy for k in g))
+            anchor = boxes[group[0]]
+            fhx, fhy = footprint_of(group)
+            in_group = set(group)
+            others = [(o.cx, o.cy, *_yaw_footprint(o), 0.0)
+                      for k, o in enumerate(boxes) if k not in in_group]
+            # Escalate the search window: a box wedged inside a dense pocket has no slot within
+            # a couple of metres, but the field is only ~36% full, so one exists further out.
+            slot = None
+            for span in (2.5, 6.0, 15.0):
+                slot = _sweep_free_slot(rng, anchor.cx, anchor.cy, fhx, fhy, others, x_span=span)
+                if slot is not None:
+                    break
+            if slot is None:
+                continue
+            dx, dy = slot[0] - anchor.cx, slot[1] - anchor.cy
+            for k in group:                      # translate as a unit, keeping tier jitter
+                o = boxes[k]
+                boxes[k] = Box(o.zone, o.cx + dx, o.cy + dy, o.cz, o.hx, o.hy, o.hz,
+                               o.density, o.yaw)
+    return boxes
+
+
+def overlapping_pairs(boxes: list["Box"], tol: float = 1e-6) -> list[tuple[int, int, float]]:
+    """Genuinely interpenetrating box pairs, as (i, j, penetration_m). The invariant a valid
+    field has to satisfy; gated in release CI rather than asserted at generation time, since
+    failing a round's course build gives miners no result at all.
+
+    Axis-aligned test, so it slightly UNDER-reports for yaw-jittered boxes -- a conservative
+    direction for a check that must not produce false alarms. Stacked climb tiers touch exactly
+    (penetration 0) and are not overlaps, hence the tolerance."""
+    out = []
+    for i, a in enumerate(boxes):
+        for j in range(i + 1, len(boxes)):
+            b = boxes[j]
+            dx = (a.hx + b.hx) - abs(a.cx - b.cx)
+            dy = (a.hy + b.hy) - abs(a.cy - b.cy)
+            dz = (a.hz + b.hz) - abs(a.cz - b.cz)
+            pen = min(dx, dy, dz)
+            if pen > tol:
+                out.append((i, j, pen))
+    return out
 
 
 def _overlaps(cx: float, cy: float, hx: float, hy: float, yaw: float,
@@ -272,6 +393,32 @@ def _overlaps(cx: float, cy: float, hx: float, hy: float, yaw: float,
     return False
 
 
+def _sweep_free_slot(rng: np.random.Generator, cx: float, cy: float, hx: float, hy: float,
+                     placed: list[tuple[float, float, float, float, float]],
+                     x_span: float = FALLBACK_X_SPAN) -> tuple[float, float] | None:
+    """First position clearing every placed footprint, searched on a lattice around (cx, cy).
+
+    Sweeps x as well as y: at a busy x the whole 6 m width can already be occupied, so a y-only
+    sweep finds nothing and was the reason ~21 boxes per round still had to be accepted
+    overlapping. Borrowing up to FALLBACK_X_SPAN of a neighbouring slice costs a little of
+    scramble's per-slice coverage guarantee and buys a field that is actually disjoint.
+
+    Visited in a seeded random order so the boxes placed this way are not pushed toward one
+    corner of the room the way a monotonic scan would push them. Returns None if the lattice has
+    no free slot at all."""
+    ylo, yhi = -TRACK_HALF_W + hy, TRACK_HALF_W - hy
+    if yhi <= ylo:
+        return None
+    ys = np.linspace(ylo, yhi, FALLBACK_Y_STEPS)
+    xs = cx + np.linspace(-x_span, x_span, FALLBACK_X_STEPS)
+    grid = [(float(x), float(y)) for x in xs for y in ys]
+    for k in rng.permutation(len(grid)):
+        x, y = grid[int(k)]
+        if not _overlaps(x, y, hx, hy, 0.0, placed):
+            return x, y
+    return None
+
+
 def _place_no_overlap(rng: np.random.Generator, hx: float, hy: float,
                        placed: list[tuple[float, float, float, float, float]],
                        sample_xy) -> tuple[float, float]:
@@ -284,7 +431,17 @@ def _place_no_overlap(rng: np.random.Generator, hx: float, hy: float,
     for _ in range(MAX_PLACEMENT_ATTEMPTS):
         cx, cy = sample_xy()
         if not _overlaps(cx, cy, hx, hy, 0.0, placed):
-            break
+            placed.append((cx, cy, hx, hy, 0.0))
+            return cx, cy
+
+    # Random sampling jammed on this box's own band -- fall back to the lattice sweep.
+    slot = _sweep_free_slot(rng, cx, cy, hx, hy, placed)
+    if slot is not None:
+        placed.append((slot[0], slot[1], hx, hy, 0.0))
+        return slot
+
+    # Nowhere on the lattice is free. Keep the last candidate rather than failing the course
+    # build: release CI gates on overlapping_pairs() being empty, so this cannot ship unnoticed.
     placed.append((cx, cy, hx, hy, 0.0))
     return cx, cy
 
@@ -655,27 +812,42 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
     # median, but this is exactly the tail case that needs a real fix, not a bigger reservation
     # (which is what caused the earlier capacity-exhaustion failure at N_CLIMB=36).
     for stack_i, (cx0, cy0) in enumerate(stack_centers):
-        base = next((b for b in boxes if b.cz == 0.0 and abs(b.cx - cx0) < 0.15
-                     and abs(b.cy - cy0) < 0.15), None)
-        if base is None:
+        # 2026-09-07: register the stack's WIDEST tier, not its tier-0 box. `side` is drawn per
+        # tier (lognormal, then scaled by 1 - 0.12*tier), so tier 1 can still come out wider
+        # than tier 0 -- and the z-resolution pass below re-sorts each stack widest-at-the-bottom
+        # anyway, so tier 0 is not reliably the bottom box. Registering tier 0's half-extent
+        # therefore under-covered the footprint that ends up on the floor, and push/scramble --
+        # sampled after climb, against this registry -- placed boxes straight into the wider
+        # tier. That was the largest remaining source of interpenetration (0.48 m at seed 1).
+        tiers = [b for b in boxes if abs(b.cx - cx0) < 0.15 and abs(b.cy - cy0) < 0.15]
+        if not tiers:
             continue
+        base = max(tiers, key=lambda b: b.hx * b.hy)
         # `placed` still contains this stack's own RESERVATION entry (added by _place_no_overlap
         # above) -- exclude it before re-checking with the real size, or the real footprint would
         # always "overlap" its own placeholder.
         others = [p for p in placed if not (abs(p[0] - cx0) < 1e-6 and abs(p[1] - cy0) < 1e-6)]
         fx, fy = cx0, cy0
         if _overlaps(fx, fy, base.hx, base.hy, 0.0, others):
-            # Real footprint collides at the reserved centre: try small local nudges before
-            # giving up (this is the rare tail case noted above, not the common path).
+            # Real footprint collides at the reserved centre. Random nudges inside +-0.5 m ran
+            # out as often as they succeeded, so fall through to the same lattice sweep the
+            # scramble/push placer uses rather than silently keeping the colliding centre.
             for _ in range(MAX_PLACEMENT_ATTEMPTS):
                 nx = cx0 + float(rng.uniform(-0.5, 0.5))
                 ny = cy0 + float(rng.uniform(-0.5, 0.5))
                 if not _overlaps(nx, ny, base.hx, base.hy, 0.0, others):
                     fx, fy = nx, ny
                     break
+            else:
+                slot = _sweep_free_slot(rng, cx0, cy0, base.hx, base.hy, others)
+                if slot is not None:
+                    fx, fy = slot
+            # Move EVERY tier of this stack, not just tier 0 -- the `cz == 0.0` filter here left
+            # the upper tiers behind at the un-nudged centre, splitting the stack in two.
             for i, b in enumerate(boxes):
-                if b.cz == 0.0 and abs(b.cx - cx0) < 0.15 and abs(b.cy - cy0) < 0.15:
-                    boxes[i] = Box(b.zone, fx, fy, b.cz, b.hx, b.hy, b.hz, b.density, b.yaw)
+                if abs(b.cx - cx0) < 0.15 and abs(b.cy - cy0) < 0.15:
+                    boxes[i] = Box(b.zone, fx + (b.cx - cx0), fy + (b.cy - cy0), b.cz,
+                                   b.hx, b.hy, b.hz, b.density, b.yaw)
             stack_centers[stack_i] = (fx, fy)
         placed.append((fx, fy, base.hx, base.hy, 0.0))
 
@@ -721,11 +893,18 @@ def sample_boxes(rng: np.random.Generator) -> list[Box]:
     climb = _sample_climb_boxes(rng, placed)
     push = _sample_push_boxes(rng, placed)
     scramble = _sample_scramble_boxes(rng, placed)
-    # Leap chain (2026-08-18): fixed, not round-sampled -- see _leap_chain_boxes' docstring for
-    # why. Appended last and NOT run through the overlap registry: it lives in the dash zone
-    # (APRON_LEN + FIELD_LEN and beyond), which no other zone's sampling band reaches, so there is
-    # no possible overlap with the round-sampled field.
-    return climb + push + scramble + _leap_chain_boxes()
+    # Leap chain (2026-08-18): fixed, not round-sampled -- see _leap_chain_boxes' docstring.
+    #
+    # It used to be appended AFTER the overlap work on the argument that it "lives in the dash
+    # zone (APRON_LEN + FIELD_LEN and beyond), which no other zone's sampling band reaches, so
+    # there is no possible overlap". That stopped being true when the room grew: the field now
+    # spans APRON_LEN..APRON_LEN+FIELD_LEN = 8..45 m and the chain starts around x = 42.7, so the
+    # two genuinely share ground. It goes through the repair pass with everything else -- as
+    # immovable structure, since the elevated finish depends on the chain being where it is.
+    sampled = climb + push + scramble
+    leap = _leap_chain_boxes()
+    pinned = set(range(len(sampled), len(sampled) + len(leap)))
+    return _repair_overlaps(rng, sampled + leap, pinned)
 
 
 def build_course(rng: np.random.Generator):

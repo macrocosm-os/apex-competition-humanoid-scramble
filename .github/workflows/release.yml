@@ -102,6 +102,62 @@ jobs:
           print("ok: the vendored gym_v1 is the only gym_v1 on sys.path")
           PY
 
+      # Actuator order is not dof order: MuJoCo numbers joints by the body tree, and
+      # g1_22dof.xml declares the torso/arm chain before the legs, while the <actuator> block
+      # lists legs first. Pairing ctrl[i] with a flat qpos[7+i] slice therefore drives every
+      # actuator from a different joint's error -- the robot explodes past QVEL_GLITCH_LIMIT in
+      # a few control steps and every instance scores 0. The terminal-reason check below does
+      # NOT catch this: physics_glitch is a "real physics reason", so a fully broken robot looks
+      # like a weak policy. Assert the pairing structurally, and then assert the dynamics.
+      - name: Every actuator is driven by its own joint's state
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import numpy as np
+          from env import ParkourSim, instance_spec
+          from env.sim import QVEL_GLITCH_LIMIT, ACT_DIM
+          sim = ParkourSim(instance_spec(0, 24, 1)); sim.reset()
+          m = sim.model
+          mism = [i for i in range(m.nu)
+                  if m.jnt_qposadr[m.actuator_trnid[i, 0]] != sim._qadr[i]
+                  or m.jnt_dofadr[m.actuator_trnid[i, 0]] != sim._vadr[i]]
+          assert not mism, f"actuators paired with the wrong joint's state: {mism}"
+
+          # Holding the default pose must stay inside the physical regime. A robot whose PD loop
+          # is mis-wired blows past the glitch limit within ~5 control steps; a correctly wired
+          # one topples slowly (it is not a balance controller) and peaks around 5 rad/s.
+          peak = 0.0
+          for _ in range(50):
+              r = sim.step(np.zeros(ACT_DIM), max_steps=3000)
+              peak = max(peak, float(np.abs(sim.data.qvel).max()))
+              assert r.terminal_reason != "physics_glitch", \
+                  f"left the physical regime holding the default pose (peak |qvel| {peak:.1f})"
+          assert peak < QVEL_GLITCH_LIMIT / 2, f"default-pose hold is unstable: peak |qvel| {peak:.1f}"
+          print(f"ok: 22/22 actuators correctly paired, peak |qvel| holding pose = {peak:.2f}")
+          PY
+
+      # The box field has to be disjoint at t=0. Rejection sampling used to give up after 60
+      # tries and keep its last (overlapping) candidate, which left 34-42 interpenetrating pairs
+      # per round at up to 0.58 m -- MuJoCo then resolved that by throwing boxes across the room
+      # on the first steps, so the course a policy met was not the course that was sampled.
+      # Checked over a spread of seeds because it is a property of the draw, not of one field.
+      - name: The sampled box field is disjoint
+        run: |
+          PYTHONPATH=. python - <<'PY'
+          import numpy as np
+          from env.course import N_BOXES, overlapping_pairs, sample_boxes
+          worst = []
+          for seed in range(1, 13):
+              boxes = sample_boxes(np.random.default_rng([seed, 0xB0B]))
+              assert len(boxes) >= N_BOXES, f"seed {seed}: {len(boxes)} boxes, expected >= {N_BOXES}"
+              pairs = overlapping_pairs(boxes)
+              if pairs:
+                  i, j, pen = max(pairs, key=lambda t: t[2])
+                  worst.append(f"seed {seed}: {len(pairs)} overlapping pairs, deepest {pen:.3f} m "
+                               f"({boxes[i].zone}/{boxes[j].zone})")
+          assert not worst, "box field is not disjoint:\n  " + "\n  ".join(worst)
+          print("ok: 12 seeds sampled, no interpenetrating boxes")
+          PY
+
       # The one artifact that conforms to this competition's interface today. It cannot walk;
       # its job is to prove the loop is wired, so the assertion is about terminal reasons rather
       # than about score.
