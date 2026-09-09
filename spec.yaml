@@ -1,7 +1,7 @@
 schema: apex.competition.v1
-id: box_scramble
-version: 0.1.4
-display_name: "Box Scramble"
+id: humanoid_box_scramble
+version: 0.1.5
+display_name: "Humanoid Box Scramble"
 kind: solo
 process_type: cpu
 
@@ -22,9 +22,17 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
+# NOTE (v0.1.5): digests below are v0.1.4's at tag time -- preflight needs digests that parse
+# before the real ones exist. Re-pinned in a follow-up.
+#
 # Pinned from the v0.1.4 release run (Actions run 34297786672, all four jobs green), both
 # cosign-verified: SAN `.../release.yml@refs/tags/v0.1.4` against this file's identity glob,
 # GitHub OIDC issuer, githubWorkflowSha 3b830b5 = v0.1.4^{commit}. The platform pins by digest.
+#
+# 0.1.5 renames the competition id box_scramble -> humanoid_box_scramble, so the dashboard can
+# route it to the shared humanoid visualisation by prefix. Identity change only; the referee and
+# player code is 0.1.4's. It is a NEW competition_key: existing box_scramble spec versions and
+# any competition row still on the old pkg do not carry over.
 #
 # 0.1.4 is a config-only change: 1-day rounds and a 1-day model reveal.
 #
