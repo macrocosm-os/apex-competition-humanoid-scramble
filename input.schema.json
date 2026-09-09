@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "box_scramble round input",
+  "title": "humanoid_box_scramble round input",
   "description": "Evaluation shape for one round. Unlike upstream Humanoid Parkour (static, public geometry), the box field ITSELF is drawn from `seed` inside the referee (env/course.sample_boxes) -- fixed box count and zone roles (100 scramble / 60 push / 36 climb), sampled size/density/placement. Each instance's wind is drawn from the same seed (env/sim.instance_spec), so the suite differs every round and the box field is identical across every instance within one round.",
   "type": "object",
   "additionalProperties": false,
