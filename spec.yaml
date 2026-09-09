@@ -22,12 +22,9 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# NOTE (v0.1.4): digests below are v0.1.3's at tag time -- preflight needs digests that parse
-# before the real ones exist. Re-pinned in a follow-up.
-#
-# Pinned from the v0.1.3 release run (Actions run 34279556215, all four jobs green), both
-# cosign-verified: SAN `.../release.yml@refs/tags/v0.1.3` against this file's identity glob,
-# GitHub OIDC issuer, githubWorkflowSha 688fc38 = v0.1.3^{commit}. The platform pins by digest.
+# Pinned from the v0.1.4 release run (Actions run 34297786672, all four jobs green), both
+# cosign-verified: SAN `.../release.yml@refs/tags/v0.1.4` against this file's identity glob,
+# GitHub OIDC issuer, githubWorkflowSha 3b830b5 = v0.1.4^{commit}. The platform pins by digest.
 #
 # 0.1.4 is a config-only change: 1-day rounds and a 1-day model reveal.
 #
@@ -46,7 +43,7 @@ resources:
 # Both are fixed here and both are now gated in release CI. Do not activate 0.1.0 anywhere.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
-  digest: sha256:a84ed0e72a1a0dc495a1d32ad9fd4443d4548808963fedc0e250d48b48d4f4ab
+  digest: sha256:ced143cb14e52e6e3ee9a4d4a69560d0ff626174dfee7c42422c81d37b545227
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
@@ -113,7 +110,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
-    digest: sha256:47d4014608d86df26a1ca3b5d5a39bf4b6ab50d8c1bd433112e83b347b6cd33c
+    digest: sha256:6bb7a39825c121923947ed9c6d3a2d68bc7431ea02c62837cf68ad7a55807449
   # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
   # with no grace: nothing is written and the round has no result, which the platform attributes
   # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
