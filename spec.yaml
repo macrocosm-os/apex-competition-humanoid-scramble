@@ -76,8 +76,8 @@ defaults:
   # number before onboarding (HANDOFF.md SS2/SS4) -- unmeasured here because the baseline for
   # THIS course (box contact dynamics, not parkour's fixed geometry) has not been run yet.
   baseline_raw_score: 0.0
-  round_length_in_days: 2
-  submission_reveal_days: 5      # trained policies carry real R&D; protect them, same as upstream
+  round_length_in_days: 1
+  submission_reveal_days: 1
   lower_is_better: false
 
 entrypoints:
