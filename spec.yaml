@@ -1,6 +1,6 @@
 schema: apex.competition.v1
 id: box_scramble
-version: 0.1.3
+version: 0.1.4
 display_name: "Box Scramble"
 kind: solo
 process_type: cpu
@@ -22,9 +22,14 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
+# NOTE (v0.1.4): digests below are v0.1.3's at tag time -- preflight needs digests that parse
+# before the real ones exist. Re-pinned in a follow-up.
+#
 # Pinned from the v0.1.3 release run (Actions run 34279556215, all four jobs green), both
 # cosign-verified: SAN `.../release.yml@refs/tags/v0.1.3` against this file's identity glob,
 # GitHub OIDC issuer, githubWorkflowSha 688fc38 = v0.1.3^{commit}. The platform pins by digest.
+#
+# 0.1.4 is a config-only change: 1-day rounds and a 1-day model reveal.
 #
 # 0.1.3 makes declared surface friction reach the solver (geom_priority on room and crate geoms).
 # It was inert in 0.1.0-0.1.2, so crate density set mass but not grip.
