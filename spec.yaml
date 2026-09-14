@@ -22,9 +22,9 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# NOTE: these digests are still v0.1.5's. `apex-dev preflight` gates the release job and rejects
-# a malformed digest, so the tag has to carry format-valid ones; the v0.1.6 digests are pinned in
-# a follow-up PR once the release run publishes them. Do not activate 0.1.6 before that lands.
+# Pinned from the v0.1.6 release run (Actions run 34855196763, all four jobs green), both
+# cosign-verified: SAN `.../release.yml@refs/tags/v0.1.6` against this file's identity glob,
+# GitHub OIDC issuer, githubWorkflowSha 2068d6e = v0.1.6^{commit}. The platform pins by digest.
 #
 # 0.1.6 makes the course climbable by hand as well as by foot. Push crates are now a carryable
 # building block (0.55-0.95 m wide, 0.30-0.45 m tall, 12-30 kg/m3) rather than a shove-only
@@ -56,7 +56,7 @@ resources:
 # Both are fixed here and both are now gated in release CI. Do not activate 0.1.0 anywhere.
 image:
   ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-player
-  digest: sha256:27c14bfc85b3ffe7473a4e4ca6040e6a2a93b3a567ee844f23862bfdbb8c052b
+  digest: sha256:613c18199837e9e873d4edc1b93c3d31f61ee09220c85b10dfd207c7dc780053
 
 # ONNX artifact: the miner submits a policy graph, not code. The player image validates the
 # interface at load time -- obs [batch,136] + state_in [batch,256] -> action [batch,22] +
@@ -123,7 +123,7 @@ referee:
   protocol: gym_v1
   image:
     ref: ghcr.io/macrocosm-os/apex-competition-humanoid-scramble-referee
-    digest: sha256:933b38336b132d7b67686433a68dcf4575c5c3075e1a5f8c987f70e1aeaf9c08
+    digest: sha256:54e2591c0fe486e7a968bd8592f63a358c216cf7862dca508a2746223bb5c7ba
   # RE-MEASURE before onboarding (see entrypoints.evaluate.timeout_s above). This is a hard kill
   # with no grace: nothing is written and the round has no result, which the platform attributes
   # to the referee. The referee therefore runs the suite to its OWN wall-clock budget --
