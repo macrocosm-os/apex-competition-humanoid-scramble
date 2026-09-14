@@ -222,10 +222,19 @@ DENSITY_CLIMB = (350.0 * _DENSITY_SCALE, 1400.0 * _DENSITY_SCALE)     # still de
 # Sliding friction scales with density (heavier, denser material grips better in this course's
 # fiction — think rubberised crate vs. slick lightweight tote), same spirit as parkour's
 # friction-band-by-surface-kind. Returns (lo, hi) mu band for a given density.
+# Grip is a SURFACE property and mass is a BULK one, so they are drawn independently (changed
+# 2026-09-14). Deriving mu from density tied them together backwards: the crates made light
+# enough to lift were also the most slippery, and a crate the robot cannot hold or stand on is
+# not a building block. The floor is 0.90, so a crate is still the worse surface.
+#
+# Floor of 0.40 is what a two-palm pinch needs to hold a median crate at arm's length
+# (2*mu*N >= m*g, N = 25 N.m / 0.326 m); the top of the band is good footing for climbing.
+GRIP_BAND = (0.40, 0.85)
+
+
 def _friction_band(density: float) -> tuple[float, float]:
-    lo = float(np.interp(density, [20.0, 1400.0], [0.15, 0.55]))
-    hi = float(np.interp(density, [20.0, 1400.0], [0.35, 0.95]))
-    return lo, hi
+    """Retained for the recorded-history reader; grip no longer depends on density."""
+    return GRIP_BAND
 
 
 # ---------------------------------------------------------------------------------------------
@@ -289,7 +298,7 @@ def _yaw_footprint(b: "Box") -> tuple[float, float]:
 
 
 def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[int],
-                     rounds: int = 12) -> list["Box"]:
+                     rounds: int = 20) -> list["Box"]:
     """Relocate the few boxes that still overlap after sampling, and return the repaired field.
 
     Each sampler keeps its own footprint registry and each registers something slightly
@@ -345,7 +354,7 @@ def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[i
             # Escalate the search window: a box wedged inside a dense pocket has no slot within
             # a couple of metres, but the field is only ~36% full, so one exists further out.
             slot = None
-            for span in (2.5, 6.0, 15.0):
+            for span in (2.5, 6.0, 15.0, 30.0):
                 slot = _sweep_free_slot(rng, anchor.cx, anchor.cy, fhx, fhy, others, x_span=span)
                 if slot is not None:
                     break
@@ -355,7 +364,7 @@ def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[i
             for k in group:                      # translate as a unit, keeping tier jitter
                 o = boxes[k]
                 boxes[k] = Box(o.zone, o.cx + dx, o.cy + dy, o.cz, o.hx, o.hy, o.hz,
-                               o.density, o.yaw)
+                               o.density, o.yaw, o.friction)
     return boxes
 
 
@@ -460,6 +469,7 @@ class Box:
     hz: float            # half-extents
     density: float
     yaw: float = 0.0      # small random yaw jitter so piles don't look gridded
+    friction: float = 0.6  # sliding mu, drawn independently of density -- see GRIP_BAND
 
 
 @dataclass
@@ -542,7 +552,8 @@ def _leap_chain_boxes() -> list[Box]:
     x = APRON_LEN + FIELD_LEN + DASH_LEN - LEAP_COUNT * (2 * hx + LEAP_GAP)
     for i in range(LEAP_COUNT):
         cx = x + i * (2 * hx + LEAP_GAP) + hx
-        boxes.append(Box("climb", cx, 0.0, PLINTH_TOP + hz, hx, hy, hz, float(np.mean(DENSITY_CLIMB))))
+        boxes.append(Box("climb", cx, 0.0, PLINTH_TOP + hz, hx, hy, hz,
+                         float(np.mean(DENSITY_CLIMB)), 0.0, float(np.mean(GRIP_BAND))))
     return boxes
 
 
@@ -624,6 +635,7 @@ def _sample_scramble_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         side = _lognormal_clip(rng, *SCRAMBLE_SIDE)
         h = _lognormal_clip(rng, *SCRAMBLE_HEIGHT)
         density = float(rng.uniform(*DENSITY_SCRAMBLE))
+        grip = float(rng.uniform(*GRIP_BAND))
         yaw = float(rng.uniform(-0.4, 0.4))
 
         def sample_xy(slice_x0=slice_x0, slice_len=slice_len):
@@ -638,7 +650,7 @@ def _sample_scramble_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         # the overlap rejection on top, so the earlier "guaranteed even spread" fix still holds.
         sx, sy = _place_no_overlap(rng, side / 2, side / 2, placed, sample_xy)
         boxes.append(Box("scramble", sx, sy, PLINTH_TOP + h / 2,
-                        side / 2, side / 2, h / 2, density, yaw))
+                        side / 2, side / 2, h / 2, density, yaw, grip))
     return boxes
 
 
@@ -668,6 +680,7 @@ def _sample_push_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         side = _lognormal_clip(rng, *PUSH_SIDE)
         h = _lognormal_clip(rng, *PUSH_HEIGHT)
         density = float(rng.uniform(*DENSITY_PUSH))
+        grip = float(rng.uniform(*GRIP_BAND))
 
         def sample_xy(sx0=sx0):
             # Small x jitter around this box's own lane slot, on top of the full-width y draw --
@@ -678,7 +691,8 @@ def _sample_push_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
             return sx, sy
 
         sx, sy = _place_no_overlap(rng, side / 2, side / 2, placed, sample_xy)
-        boxes.append(Box("push", sx, sy, PLINTH_TOP + h / 2, side / 2, side / 2, h / 2, density))
+        boxes.append(Box("push", sx, sy, PLINTH_TOP + h / 2, side / 2, side / 2, h / 2,
+                         density, 0.0, grip))
     return boxes
 
 
@@ -799,10 +813,12 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         side = _lognormal_clip(rng, *CLIMB_SIDE) * (1.0 - 0.12 * tier)   # narrower per tier up
         h = _lognormal_clip(rng, *CLIMB_HEIGHT)
         density = float(rng.uniform(*DENSITY_CLIMB))
+        grip = float(rng.uniform(*GRIP_BAND))
         # z is resolved properly in build_course once tier heights for this stack are known;
         # placeholder height carries the tier index for the second pass.
         jx, jy = rng.uniform(-0.08, 0.08, 2)
-        boxes.append(Box("climb", cx0 + jx, cy0 + jy, float(tier), side / 2, side / 2, h / 2, density))
+        boxes.append(Box("climb", cx0 + jx, cy0 + jy, float(tier), side / 2, side / 2, h / 2,
+                         density, 0.0, grip))
 
     # No-overlap check ACROSS stacks (2026-08-18, Crux: "make sure no objects overlap"), FIXED
     # (second pass): the first version only registered the RESERVATION placeholder size
@@ -851,7 +867,7 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
             for i, b in enumerate(boxes):
                 if abs(b.cx - cx0) < 0.15 and abs(b.cy - cy0) < 0.15:
                     boxes[i] = Box(b.zone, fx + (b.cx - cx0), fy + (b.cy - cy0), b.cz,
-                                   b.hx, b.hy, b.hz, b.density, b.yaw)
+                                   b.hx, b.hy, b.hz, b.density, b.yaw, b.friction)
             stack_centers[stack_i] = (fx, fy)
         placed.append((fx, fy, base.hx, base.hy, 0.0))
 
@@ -873,7 +889,8 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         top = PLINTH_TOP
         for b in blist:
             z = top + b.hz
-            resolved.append(Box(b.zone, b.cx, b.cy, z, b.hx, b.hy, b.hz, b.density, b.yaw))
+            resolved.append(Box(b.zone, b.cx, b.cy, z, b.hx, b.hy, b.hz, b.density, b.yaw,
+                                b.friction))
             top += 2 * b.hz
     return resolved
 
@@ -934,12 +951,11 @@ def floor_xml_fragment(segs: list[Seg]) -> str:
 def boxes_xml_fragment(boxes: list[Box]) -> str:
     """Boxes as FREE BODIES (joint type free) with density-derived mass/inertia, so pushing and
     climbing are genuine contact-solver outcomes, not scripted animations. Each gets its own
-    friction band from its density (see _friction_band) so light push boxes are also slicker to
-    stand on -- consistent with them being loose, low-friction crates rather than sticky ones."""
+    own sliding friction, drawn independently of density (see GRIP_BAND), so a crate can be light
+    enough to carry and still grippy enough to hold and to stand on."""
     out = []
     for i, b in enumerate(boxes):
-        lo, hi = _friction_band(b.density)
-        mu = lo + (hi - lo) * 0.5   # per-box median; sim.py may jitter like parkour's slabs
+        mu = b.friction
         out.append(
             f'  <body name="{BOX_PREFIX}{i}" pos="{b.cx:.3f} {b.cy:.3f} {b.cz:.3f}" '
             f'euler="0 0 {b.yaw:.4f}">\n'
