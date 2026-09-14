@@ -20,7 +20,7 @@ directly. The finish is 1.6 m up, so the crossing has to end in a climb or a lea
 | evaluation | 12 instances × ≤ 2000 control steps, 700 s suite budget, 500 ms per `/act` — the round input, which lives in the competition row, not in `spec.yaml` |
 | rounds | 1 day; a submission's model is revealed 1 day after it is submitted |
 | control | 50 Hz control on 500 Hz physics, PD position targets |
-| history | `box_scramble_history/3` — see [docs/frontend-integration.md](docs/frontend-integration.md) |
+| history | `box_scramble_history/3` — robot pose plus every box that moved; `env/history.py` is the reader |
 | baseline | `defaults.baseline_raw_score: 0.0` — still a placeholder, not a measurement (see Status) |
 
 The interface is **not** upstream parkour's. This robot has full arm control because pushing,
@@ -44,7 +44,8 @@ check at load and is rejected as a typed submission failure rather than silently
 **199 boxes every round**: 196 sampled (100/60/36 by role) plus the 3 fixed leap beams. The count
 and the role split are deterministic; what the round seed draws is each box's size, density, grip
 and placement. A rejection-sampling pass against a shared footprint registry keeps them from
-spawning interpenetrating. See docs/design.md for why the count is fixed rather than sampled.
+spawning interpenetrating. The count is fixed rather than sampled so that a round's difficulty is
+stable and a score reflects the policy, not the luck of the draw.
 
 Boxes are free bodies with mass derived from sampled density, so pushing, lifting and climbing are
 contact-solver outcomes, not scripted animations. Measured over 20 seeds:
@@ -116,7 +117,7 @@ and forward clearance (7 samples), and one proximity ray per hand. The scan repo
 directly below each ray — floor or box top, whichever is higher — with no "this is a box" or "this
 is zone X" channel, and no box manifest. A stack reads as a tall step; a scramble cluster reads as
 broken, closely-spaced bumps. Wind and box contact state are unobservable, which is what the
-256-wide recurrent state is for. See docs/design.md, "What the policy can and cannot see".
+256-wide recurrent state is for.
 
 ## Status
 
@@ -155,7 +156,7 @@ player/         ONNX serving + interface validation (player image)
 referee/        match driver over gym_v1 (referee image)
 baseline/       baseline.onnx + PROVENANCE.md — predates the 22-DoF interface, see Status
 tools/          preview, replay, local eval, course-layout export, policy builders
-docs/           design notes, front-end integration contract, exported course shell
+docs/           course-layout.json — the room shell for a renderer (the box field is per-round)
 .github/        release workflow and its physics/format gates
 spec.yaml       the competition manifest
 ```

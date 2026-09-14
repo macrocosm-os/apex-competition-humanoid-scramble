@@ -22,9 +22,9 @@ ROOM GEOMETRY (why 12 m x 6 m, aspect 2:1):
 
 BOX COUNT (why 20, fixed):
     Floor area = 6 x 12 = 72 sq m. A course that is all dash lanes has nothing to scramble over;
-    a course that is wall-to-wall boxes is a wall, not an obstacle -- the design goal (see
-    docs/design.md) is congestion dense enough to force weaving/pushing/climbing in three zones,
-    with real open floor in between and at the ends. Target packing fraction: ~20% of floor area
+    a course that is wall-to-wall boxes is a wall, not an obstacle -- the design goal is
+    congestion dense enough to force weaving/pushing/climbing in three zones, with real open
+    floor in between and at the ends. Target packing fraction: ~20% of floor area
     covered by box footprints, non-uniformly distributed (clustered per zone, not gridded).
 
     Box footprint area is sampled per box (see BOX_SIZE_DIST below); its mean works out to
@@ -67,8 +67,8 @@ SIZE / DENSITY DISTRIBUTIONS (sampled per box, per round, from the round seed):
 
     Density maps directly to two things a legs-only robot without grasping actually feels:
     - PUSHABILITY: MuJoCo derives box mass from density x volume. A box light enough for a
-      152 kg-equivalent body-check (see docs/design.md, "push corridor sizing") to displace
-      measurably is "pushable"; the push zone's density band is calibrated to that.
+      152 kg-equivalent body-check to displace measurably is "pushable"; the push zone's
+      density band is calibrated to that.
     - CLIMBABILITY: a stack is only good footing if the top box doesn't slide/tip when stood on.
       Heavier boxes have proportionally higher friction (BOX_FRICTION_BY_DENSITY) and the climb
       zone's boxes are sized so stacking is geometrically favoured (broad, squat boxes, low CoM)
@@ -206,10 +206,9 @@ CLIMB_HEIGHT = (0.51, 0.15, 0.39, 0.897)        # max was 0.69, now x1.3 = 0.897
 _DENSITY_SCALE = 1.5
 
 # Density bands, kg/m^3. Calibrated against what a ~32 kg legs-only G1 can plausibly move with a
-# body-check vs. what it needs as stable footing (docs/design.md, "push corridor sizing" and
-# "climb stack sizing"). Real-world anchors: dry foam/cardboard ~15-60, packed textiles/light
-# plastics ~150-350, water ~1000, wet sand/dense-packed goods ~1400-1900, similar to a
-# loaded packing crate.
+# body-check vs. what it needs as stable footing. Real-world anchors: dry foam/cardboard
+# ~15-60, packed textiles/light plastics ~150-350, water ~1000, wet sand/dense-packed goods
+# ~1400-1900, similar to a loaded packing crate.
 DENSITY_SCRAMBLE = (40.0 * _DENSITY_SCALE, 260.0 * _DENSITY_SCALE)   # light clutter, still easy
                                                                        # to knock relative to push/climb
 DENSITY_PUSH = (12.0 * _DENSITY_SCALE, 30.0 * _DENSITY_SCALE)         # LOWEST band, and lowered
@@ -508,9 +507,8 @@ def _slab(x0, length, top, color, half_w=TRACK_HALF_W):
 # a deliberately-built one -- so "stack two boxes exactly at the platform edge" is a real, viable
 # solution (not an impossible ask) rather than either a freebie (if set too low, any 2-tier climb
 # stack would already clear it) or an unreachable wall (if set at or above the lognormal max).
-# This is the same sizing PRINCIPLE docs/design.md already uses for climb-tier heights ("set
-# explicitly ABOVE the previous mechanic's ceiling so the new one can't be trivially skipped"),
-# applied one level up.
+# This is the same sizing PRINCIPLE the climb-tier heights use ("set explicitly ABOVE the
+# previous mechanic's ceiling so the new one can't be trivially skipped"), applied one level up.
 FINISH_RISE = 1.6
 
 # LEAP-CHAIN boxes (Crux's dual-strategy ask): a short, sparse row of narrow, extra-tall
@@ -526,8 +524,8 @@ FINISH_RISE = 1.6
 # would just be stacking again with extra steps). Gaps (LEAP_GAP) are set inside a standing broad
 # jump's plausible range for a ~32 kg legs+arms G1 at walking-to-running momentum -- committing,
 # not free, but not physically absurd either. Neither LEAP_TOP nor LEAP_GAP has been validated
-# against a real trained policy (same open-gap category as the push/climb band sizing in
-# docs/design.md) -- flagged there, not silently assumed correct.
+# against a real trained policy (same open-gap category as the push/climb band sizing) -- see
+# the README's "Status", not silently assumed correct.
 LEAP_COUNT = 3                 # 3 stepping-stone boxes between dash-zone floor and the platform
 # Beam top, metres above the deck. Lowered 1.10 -> 0.90 on 2026-09-14: the first move onto the
 # chain is a standing mount, and 1.10 m was well over the G1's 0.70 m hip. Still above the hip,

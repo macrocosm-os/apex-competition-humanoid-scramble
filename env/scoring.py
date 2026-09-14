@@ -1,8 +1,7 @@
-"""Per-instance scoring for Box Scramble. Unchanged from upstream Humanoid Parkour (see
-docs/design.md, "Rejected -- Checkpoint scoring"): progress along the room already gives a
-smooth gradient regardless of which zone (scramble/push/climb) is being crossed, so no
-per-zone bonus or checkpoint is needed. Shared by the referee and the local eval /
-variance-measurement tools so the numbers can never diverge.
+"""Per-instance scoring for Box Scramble. Unchanged from upstream Humanoid Parkour: progress
+along the room already gives a smooth gradient regardless of which zone (scramble/push/climb) is
+being crossed, so no per-zone bonus or checkpoint is needed. Shared by the referee and the local
+eval / variance-measurement tools so the numbers can never diverge.
 
 Per room instance (higher is better):
     completed        1.0 + (max_steps - steps) / max_steps   -> in (1.0, 2.0]
