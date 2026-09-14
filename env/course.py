@@ -177,8 +177,11 @@ N_BOXES = N_SCRAMBLE + N_PUSH + N_CLIMB   # 196
 # geometrically stable rather than a lucky topple.
 SCRAMBLE_SIDE = (0.42, 0.28, 0.28, 0.85)      # median, sigma, min, max (metres, per half-extent x2)
 SCRAMBLE_HEIGHT = (0.34, 0.30, 0.22, 0.60)
-PUSH_SIDE = (0.55, 0.20, 0.35, 0.80)
-PUSH_HEIGHT = (0.30, 0.20, 0.18, 0.42)
+# Push boxes are the CARRYABLE building block (2026-09-14): big enough to stand on, ~0.4 m tall
+# so four stack the 1.6 m from deck to finish platform, and light enough to lift -- measured
+# 2.6-12.4 kg against the arms' ~21 kg two-handed static limit at 25 N.m.
+PUSH_SIDE = (0.70, 0.18, 0.55, 0.95)
+PUSH_HEIGHT = (0.38, 0.15, 0.30, 0.45)
 
 # Climb (red) boxes: median/min/max scaled x1.5 over the original band (0.70/0.45/1.00 ->
 # 1.05/0.675/1.50) per Crux's 2026-08-18 vibe-check note. At this size a single climb box's top
@@ -209,10 +212,10 @@ _DENSITY_SCALE = 1.5
 # loaded packing crate.
 DENSITY_SCRAMBLE = (40.0 * _DENSITY_SCALE, 260.0 * _DENSITY_SCALE)   # light clutter, still easy
                                                                        # to knock relative to push/climb
-DENSITY_PUSH = (25.0 * _DENSITY_SCALE, 90.0 * _DENSITY_SCALE)         # still deliberately the
-                                                                       # LOWEST band -- shovable by
-                                                                       # contact force alone, just
-                                                                       # heavier in absolute terms
+DENSITY_PUSH = (12.0 * _DENSITY_SCALE, 30.0 * _DENSITY_SCALE)         # LOWEST band, and lowered
+                                                                       # again with the size rise so
+                                                                       # a bigger box is still
+                                                                       # liftable, not just shovable
 DENSITY_CLIMB = (350.0 * _DENSITY_SCALE, 1400.0 * _DENSITY_SCALE)     # still deliberately HIGHEST:
                                                                        # stable footing, doesn't slide/tip
 
@@ -516,8 +519,9 @@ FINISH_RISE = 1.6
 # against a real trained policy (same open-gap category as the push/climb band sizing in
 # docs/design.md) -- flagged there, not silently assumed correct.
 LEAP_COUNT = 3                 # 3 stepping-stone boxes between dash-zone floor and the platform
-LEAP_SIDE = (0.42, 0.06, 0.55)  # half-extent x/y: narrow enough to read as a stepping stone,
-                                 # not a stacking base (about half CLIMB_SIDE's median footprint)
+LEAP_SIDE = (0.42, 0.25, 0.55)  # half-extent x/y. Widened 0.06 -> 0.25 (0.12 -> 0.50 m) on
+                                 # 2026-09-14: at 0.12 m the beam was 1.7 G1 foot-widths, so the
+                                 # route was unlandable rather than demanding.
 LEAP_TOP = FINISH_RISE - 0.25    # 1.35 m: below platform height so the final hop is a step-up,
                                   # not another full mount
 LEAP_GAP = 1.05                  # metres between consecutive waypoint-box faces (edge to edge,
