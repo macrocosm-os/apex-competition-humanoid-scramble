@@ -177,8 +177,11 @@ N_BOXES = N_SCRAMBLE + N_PUSH + N_CLIMB   # 196
 # geometrically stable rather than a lucky topple.
 SCRAMBLE_SIDE = (0.42, 0.28, 0.28, 0.85)      # median, sigma, min, max (metres, per half-extent x2)
 SCRAMBLE_HEIGHT = (0.34, 0.30, 0.22, 0.60)
-PUSH_SIDE = (0.55, 0.20, 0.35, 0.80)
-PUSH_HEIGHT = (0.30, 0.20, 0.18, 0.42)
+# Push boxes are the CARRYABLE building block (2026-09-14): big enough to stand on, ~0.4 m tall
+# so four stack the 1.6 m from deck to finish platform, and light enough to lift -- measured
+# 2.6-12.4 kg against the arms' ~21 kg two-handed static limit at 25 N.m.
+PUSH_SIDE = (0.70, 0.18, 0.55, 0.95)
+PUSH_HEIGHT = (0.38, 0.15, 0.30, 0.45)
 
 # Climb (red) boxes: median/min/max scaled x1.5 over the original band (0.70/0.45/1.00 ->
 # 1.05/0.675/1.50) per Crux's 2026-08-18 vibe-check note. At this size a single climb box's top
@@ -209,20 +212,29 @@ _DENSITY_SCALE = 1.5
 # loaded packing crate.
 DENSITY_SCRAMBLE = (40.0 * _DENSITY_SCALE, 260.0 * _DENSITY_SCALE)   # light clutter, still easy
                                                                        # to knock relative to push/climb
-DENSITY_PUSH = (25.0 * _DENSITY_SCALE, 90.0 * _DENSITY_SCALE)         # still deliberately the
-                                                                       # LOWEST band -- shovable by
-                                                                       # contact force alone, just
-                                                                       # heavier in absolute terms
+DENSITY_PUSH = (12.0 * _DENSITY_SCALE, 30.0 * _DENSITY_SCALE)         # LOWEST band, and lowered
+                                                                       # again with the size rise so
+                                                                       # a bigger box is still
+                                                                       # liftable, not just shovable
 DENSITY_CLIMB = (350.0 * _DENSITY_SCALE, 1400.0 * _DENSITY_SCALE)     # still deliberately HIGHEST:
                                                                        # stable footing, doesn't slide/tip
 
 # Sliding friction scales with density (heavier, denser material grips better in this course's
 # fiction — think rubberised crate vs. slick lightweight tote), same spirit as parkour's
 # friction-band-by-surface-kind. Returns (lo, hi) mu band for a given density.
+# Grip is a SURFACE property and mass is a BULK one, so they are drawn independently (changed
+# 2026-09-14). Deriving mu from density tied them together backwards: the crates made light
+# enough to lift were also the most slippery, and a crate the robot cannot hold or stand on is
+# not a building block. The floor is 0.90, so a crate is still the worse surface.
+#
+# Floor of 0.40 is what a two-palm pinch needs to hold a median crate at arm's length
+# (2*mu*N >= m*g, N = 25 N.m / 0.326 m); the top of the band is good footing for climbing.
+GRIP_BAND = (0.40, 0.85)
+
+
 def _friction_band(density: float) -> tuple[float, float]:
-    lo = float(np.interp(density, [20.0, 1400.0], [0.15, 0.55]))
-    hi = float(np.interp(density, [20.0, 1400.0], [0.35, 0.95]))
-    return lo, hi
+    """Retained for the recorded-history reader; grip no longer depends on density."""
+    return GRIP_BAND
 
 
 # ---------------------------------------------------------------------------------------------
@@ -286,7 +298,7 @@ def _yaw_footprint(b: "Box") -> tuple[float, float]:
 
 
 def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[int],
-                     rounds: int = 12) -> list["Box"]:
+                     rounds: int = 20) -> list["Box"]:
     """Relocate the few boxes that still overlap after sampling, and return the repaired field.
 
     Each sampler keeps its own footprint registry and each registers something slightly
@@ -342,7 +354,7 @@ def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[i
             # Escalate the search window: a box wedged inside a dense pocket has no slot within
             # a couple of metres, but the field is only ~36% full, so one exists further out.
             slot = None
-            for span in (2.5, 6.0, 15.0):
+            for span in (2.5, 6.0, 15.0, 30.0):
                 slot = _sweep_free_slot(rng, anchor.cx, anchor.cy, fhx, fhy, others, x_span=span)
                 if slot is not None:
                     break
@@ -352,7 +364,7 @@ def _repair_overlaps(rng: np.random.Generator, boxes: list["Box"], pinned: set[i
             for k in group:                      # translate as a unit, keeping tier jitter
                 o = boxes[k]
                 boxes[k] = Box(o.zone, o.cx + dx, o.cy + dy, o.cz, o.hx, o.hy, o.hz,
-                               o.density, o.yaw)
+                               o.density, o.yaw, o.friction)
     return boxes
 
 
@@ -457,6 +469,7 @@ class Box:
     hz: float            # half-extents
     density: float
     yaw: float = 0.0      # small random yaw jitter so piles don't look gridded
+    friction: float = 0.6  # sliding mu, drawn independently of density -- see GRIP_BAND
 
 
 @dataclass
@@ -516,10 +529,14 @@ FINISH_RISE = 1.6
 # against a real trained policy (same open-gap category as the push/climb band sizing in
 # docs/design.md) -- flagged there, not silently assumed correct.
 LEAP_COUNT = 3                 # 3 stepping-stone boxes between dash-zone floor and the platform
-LEAP_SIDE = (0.42, 0.06, 0.55)  # half-extent x/y: narrow enough to read as a stepping stone,
-                                 # not a stacking base (about half CLIMB_SIDE's median footprint)
-LEAP_TOP = FINISH_RISE - 0.25    # 1.35 m: below platform height so the final hop is a step-up,
-                                  # not another full mount
+# Beam top, metres above the deck. Lowered 1.10 -> 0.90 on 2026-09-14: the first move onto the
+# chain is a standing mount, and 1.10 m was well over the G1's 0.70 m hip. Still above the hip,
+# so this eases the route rather than solving it. LEAP_TOP was previously dead -- the height came
+# from LEAP_SIDE's hz and this constant was never read, while its comment claimed otherwise.
+LEAP_TOP = 0.90
+LEAP_SIDE = (0.42, 0.25, LEAP_TOP / 2)  # half-extent x/y/z. Width widened 0.06 -> 0.25
+                                         # (0.12 -> 0.50 m) the same day: at 0.12 m the beam was
+                                         # 1.7 G1 foot-widths, unlandable rather than demanding.
 LEAP_GAP = 1.05                  # metres between consecutive waypoint-box faces (edge to edge,
                                   # not centre to centre) -- a committed but plausible standing gap
 
@@ -538,7 +555,8 @@ def _leap_chain_boxes() -> list[Box]:
     x = APRON_LEN + FIELD_LEN + DASH_LEN - LEAP_COUNT * (2 * hx + LEAP_GAP)
     for i in range(LEAP_COUNT):
         cx = x + i * (2 * hx + LEAP_GAP) + hx
-        boxes.append(Box("climb", cx, 0.0, PLINTH_TOP + hz, hx, hy, hz, float(np.mean(DENSITY_CLIMB))))
+        boxes.append(Box("climb", cx, 0.0, PLINTH_TOP + hz, hx, hy, hz,
+                         float(np.mean(DENSITY_CLIMB)), 0.0, float(np.mean(GRIP_BAND))))
     return boxes
 
 
@@ -620,6 +638,7 @@ def _sample_scramble_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         side = _lognormal_clip(rng, *SCRAMBLE_SIDE)
         h = _lognormal_clip(rng, *SCRAMBLE_HEIGHT)
         density = float(rng.uniform(*DENSITY_SCRAMBLE))
+        grip = float(rng.uniform(*GRIP_BAND))
         yaw = float(rng.uniform(-0.4, 0.4))
 
         def sample_xy(slice_x0=slice_x0, slice_len=slice_len):
@@ -634,7 +653,7 @@ def _sample_scramble_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         # the overlap rejection on top, so the earlier "guaranteed even spread" fix still holds.
         sx, sy = _place_no_overlap(rng, side / 2, side / 2, placed, sample_xy)
         boxes.append(Box("scramble", sx, sy, PLINTH_TOP + h / 2,
-                        side / 2, side / 2, h / 2, density, yaw))
+                        side / 2, side / 2, h / 2, density, yaw, grip))
     return boxes
 
 
@@ -664,6 +683,7 @@ def _sample_push_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         side = _lognormal_clip(rng, *PUSH_SIDE)
         h = _lognormal_clip(rng, *PUSH_HEIGHT)
         density = float(rng.uniform(*DENSITY_PUSH))
+        grip = float(rng.uniform(*GRIP_BAND))
 
         def sample_xy(sx0=sx0):
             # Small x jitter around this box's own lane slot, on top of the full-width y draw --
@@ -674,7 +694,8 @@ def _sample_push_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
             return sx, sy
 
         sx, sy = _place_no_overlap(rng, side / 2, side / 2, placed, sample_xy)
-        boxes.append(Box("push", sx, sy, PLINTH_TOP + h / 2, side / 2, side / 2, h / 2, density))
+        boxes.append(Box("push", sx, sy, PLINTH_TOP + h / 2, side / 2, side / 2, h / 2,
+                         density, 0.0, grip))
     return boxes
 
 
@@ -795,10 +816,12 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         side = _lognormal_clip(rng, *CLIMB_SIDE) * (1.0 - 0.12 * tier)   # narrower per tier up
         h = _lognormal_clip(rng, *CLIMB_HEIGHT)
         density = float(rng.uniform(*DENSITY_CLIMB))
+        grip = float(rng.uniform(*GRIP_BAND))
         # z is resolved properly in build_course once tier heights for this stack are known;
         # placeholder height carries the tier index for the second pass.
         jx, jy = rng.uniform(-0.08, 0.08, 2)
-        boxes.append(Box("climb", cx0 + jx, cy0 + jy, float(tier), side / 2, side / 2, h / 2, density))
+        boxes.append(Box("climb", cx0 + jx, cy0 + jy, float(tier), side / 2, side / 2, h / 2,
+                         density, 0.0, grip))
 
     # No-overlap check ACROSS stacks (2026-08-18, Crux: "make sure no objects overlap"), FIXED
     # (second pass): the first version only registered the RESERVATION placeholder size
@@ -847,7 +870,7 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
             for i, b in enumerate(boxes):
                 if abs(b.cx - cx0) < 0.15 and abs(b.cy - cy0) < 0.15:
                     boxes[i] = Box(b.zone, fx + (b.cx - cx0), fy + (b.cy - cy0), b.cz,
-                                   b.hx, b.hy, b.hz, b.density, b.yaw)
+                                   b.hx, b.hy, b.hz, b.density, b.yaw, b.friction)
             stack_centers[stack_i] = (fx, fy)
         placed.append((fx, fy, base.hx, base.hy, 0.0))
 
@@ -869,7 +892,8 @@ def _sample_climb_boxes(rng: np.random.Generator, placed: list) -> list[Box]:
         top = PLINTH_TOP
         for b in blist:
             z = top + b.hz
-            resolved.append(Box(b.zone, b.cx, b.cy, z, b.hx, b.hy, b.hz, b.density, b.yaw))
+            resolved.append(Box(b.zone, b.cx, b.cy, z, b.hx, b.hy, b.hz, b.density, b.yaw,
+                                b.friction))
             top += 2 * b.hz
     return resolved
 
@@ -930,12 +954,11 @@ def floor_xml_fragment(segs: list[Seg]) -> str:
 def boxes_xml_fragment(boxes: list[Box]) -> str:
     """Boxes as FREE BODIES (joint type free) with density-derived mass/inertia, so pushing and
     climbing are genuine contact-solver outcomes, not scripted animations. Each gets its own
-    friction band from its density (see _friction_band) so light push boxes are also slicker to
-    stand on -- consistent with them being loose, low-friction crates rather than sticky ones."""
+    own sliding friction, drawn independently of density (see GRIP_BAND), so a crate can be light
+    enough to carry and still grippy enough to hold and to stand on."""
     out = []
     for i, b in enumerate(boxes):
-        lo, hi = _friction_band(b.density)
-        mu = lo + (hi - lo) * 0.5   # per-box median; sim.py may jitter like parkour's slabs
+        mu = b.friction
         out.append(
             f'  <body name="{BOX_PREFIX}{i}" pos="{b.cx:.3f} {b.cy:.3f} {b.cz:.3f}" '
             f'euler="0 0 {b.yaw:.4f}">\n'

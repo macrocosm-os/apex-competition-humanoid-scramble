@@ -41,7 +41,7 @@ from .sim import FRAME_SKIP, PHYS_DT
 # more than a millimetre and 6 move more than a centimetre, so the robot plus the movers is ~17%
 # of what /1 wrote. A reader fills every box in from `frames.boxes.rest` and animates the indices
 # in `frames.boxes` over it -- see reconstruct_qpos(), which does exactly that.
-FORMAT = "box_scramble_history/2"
+FORMAT = "box_scramble_history/3"
 
 # A box counts as moved if its centre shifts at least this far, in metres, at any recorded frame.
 # Well below the smallest box half-extent, so a box that is genuinely nudged is always kept and
@@ -50,7 +50,7 @@ MOVED_EPS = 1e-3
 
 # Fields of one recorded box, in this order, packed as a float32 (N_BOXES, 8) array. Zones are
 # stored separately as a plain list of strings: they are labels, not numbers.
-BOX_FIELDS = ("cx", "cy", "cz", "hx", "hy", "hz", "density", "yaw")
+BOX_FIELDS = ("cx", "cy", "cz", "hx", "hy", "hz", "density", "yaw", "friction")
 
 # Recording every control step is 50 Hz. 2 is the default because the replay renders at 25 fps
 # anyway (tools/replay.py picks a stride to hit ~30 fps), so at stride 2 the video is IDENTICAL
@@ -133,11 +133,12 @@ def boxes_from_record(record: dict[str, Any]) -> list[Any]:
 
     field = record["conditions"]["box_field"]
     fields = [str(f) for f in field["fields"]]
-    if fields != list(BOX_FIELDS):
+    # /2 and earlier carried no `friction` column; those boxes fall back to the Box default.
+    if fields != list(BOX_FIELDS) and fields != list(BOX_FIELDS[:-1]):
         raise ValueError(f"unexpected box_field columns {fields}")
     values = unpack(field["values"])
     zones = [str(z) for z in field["zones"]]
-    if values.shape != (len(zones), len(BOX_FIELDS)):
+    if values.shape != (len(zones), len(fields)):
         raise ValueError(f"box_field values {values.shape} do not match {len(zones)} zones")
     return [Box(zone, *(float(v) for v in row)) for zone, row in zip(zones, values)]
 
