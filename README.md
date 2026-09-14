@@ -1,166 +1,164 @@
-# Box Scramble
+# Humanoid Box Scramble
 
-![Box Scramble course preview: Unitree G1 humanoid facing a 48m x 6m room scattered with yellow/orange light clutter, blue shovable crates, and red heavy box stacks](renders_team_share/scene_seed495117.png)
+![Box Scramble course: a Unitree G1 humanoid at the start of a 48 m x 6 m room scattered with orange clutter, blue push crates and red climb stacks, with an elevated finish platform at the far end](renders_team_share/scene_seed495117_v0.1.6.png)
 
-*Course render (seed 495117) — robot at the start, box density and difficulty increasing toward the far end.*
+*Course render (seed 495117, v0.1.6) — robot at the start, difficulty rising toward the far end.*
 
 An Apex competition (Bittensor Subnet 1). Fork of
 [Humanoid Parkour](https://github.com/macrocosm-os/apex-competition-humanoid-parkour). Miners
 submit an **ONNX policy** that drives a Unitree G1 humanoid across a 48 m x 6 m room scattered
-with a per-round-sampled field of 196 loose boxes: a dense scramble cluster, a corridor of light
-shovable crates, and stacks of heavy boxes too tall to step onto directly.
+with a per-round-sampled field of 196 loose boxes: light clutter to weave through, crates light
+enough to shove *and* to pick up and stack, and piles too heavy and too tall to step onto
+directly. The finish is 1.6 m up, so the crossing has to end in a climb or a leap.
 
 | | |
 |---|---|
-| id / version | `box_scramble` 0.1.0 |
-| robot | Unitree G1, **22 actuated DoF** — 12 legs + 10 arms (shoulder pitch/roll/yaw, elbow, wrist roll x2 sides), full arm control (2026-08-18, was 12 leg-only DoF) |
-| submission | ONNX graph, ≤ 15 MB, architecture free (same interface as upstream) |
-| interface | `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]`, float32 (was `obs[104]`/`action[12]` — BREAKING change, 2026-08-18) |
-| evaluation | 24 instances (inherited from upstream, **not yet re-measured for this course** — see docs/design.md), ≤ 3000 control steps each, box field + wind drawn per round |
-| baseline | 0.675 raw score, 32/48 m crossed, full-arm-control policy (Amy, 2026-08-18) — **predates the elevated finish below**, see "Open" |
-| finish | **elevated 1.6 m above the main floor (2026-08-18)** — climbing or leaping is now mandatory to complete the course, not optional |
+| id / version | `humanoid_box_scramble` 0.1.6 |
+| robot | Unitree G1, **22 actuated DoF** — 12 legs + 10 arms (shoulder pitch/roll/yaw, elbow, wrist roll, per side), 38.2 kg |
+| submission | ONNX graph, ≤ 15 MB, architecture free |
+| interface | `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]`, float32 |
+| evaluation | 12 instances × ≤ 2000 control steps, 700 s suite budget, 500 ms per `/act` — the round input, which lives in the competition row, not in `spec.yaml` |
+| rounds | 1 day; a submission's model is revealed 1 day after it is submitted |
+| control | 50 Hz control on 500 Hz physics, PD position targets |
+| history | `box_scramble_history/3` — robot pose plus every box that moved; `env/history.py` is the reader |
+| baseline | `defaults.baseline_raw_score: 0.0` — still a placeholder, not a measurement (see Status) |
 
-## The robot has full arm control (2026-08-18)
-
-**Changed from the original fork.** The first version of this course kept upstream's legs-only
-G1 (12 actuated DoF, arms welded as dead collision geometry) on purpose, matching upstream's own
-"push = body-check, climb = leg-mounts only" design. Crux explicitly asked for that reversed:
-*"replace the base model with one that has full control of its arms—this is important as there
-will be pushing, lifting and climbing involved."* The robot now has 10 actuated arm DoF (5 per
-arm: shoulder pitch/roll/yaw, elbow, wrist roll) on top of the unchanged 12 leg DoF —
-**22 actuated DoF total**, up from 12. See `env/assets/g1_22dof.xml` and `env/sim.py`'s module
-docstring for the full spec (joint ranges/torque limits taken from Unitree's own published
-29-DoF G1 model, adapted to this repo's vendored meshes) and what changed as a result (action/
-observation dims, PD gains, default pose — all BREAKING changes to the interface; a submission
-built for the old 12-DoF/104-obs contract will not load here).
-
-This is a genuine one-way-door reversal, not a tweak: `docs/design.md` still carries the ORIGINAL
-design rationale for the legs-only decision as a historical record (it explains real tradeoffs
-that mattered when the course had no arms), immediately followed by the 2026-08-18 update
-explaining why it was reversed. Read both, not just the newest note, if you want the full
-reasoning trail on why arms were added and what it costs (see "Open" below — arm PD gains and
-the new hand-proximity observation channel are unvalidated against a real trained policy, same
-category of gap the original push/climb box-band sizing already carried).
+The interface is **not** upstream parkour's. This robot has full arm control because pushing,
+lifting and climbing are the task, where parkour's was legs-only at 12 DoF; the observation grew
+with it. A submission built for upstream, or for this course before 2026-08-18, fails the shape
+check at load and is rejected as a typed submission failure rather than silently truncated.
 
 ## The room
 
-48 m long, 6 m wide (length doubled twice from the original 12 m brief; width unchanged — see
-docs/design.md for why the room is no longer 2:1). West to east:
+48 m long, 6 m wide. West to east:
 
 | Zone | Extent | Boxes | Forces |
 |---|---|---|---|
-| start apron | 0.0 – 8.0 m | 0 | settle into gait |
-| **mixed field** (scramble + push, interleaved) | 8.0 – 45.0 m | 100 scramble / 60 push | weaving and displacing light boxes, spread across the whole field, not confined to a sub-zone |
-| **climb zone** (second half only) | 24.0 – 45.0 m | 36 | a genuine multi-mount climb — 1–2 tiers per pile (not always two), tops above the single-leg step-up ceiling; boxes up to 30% bigger than the original band |
-| dash approach | 45.0 – 47.0 m | 0 (+ 3 fixed leap-chain boxes near the end) | short sprint, then choose your route up |
-| **finish platform** | 47.0 – 48.0 m | — | raised **1.6 m** above the main floor — completion now requires height, not just reaching x = 48 m |
+| start apron | 0 – 8 m | 0 | settle into gait |
+| mixed field (scramble + push interleaved) | 8 – 45 m | 100 scramble / 60 push | weaving, shoving, and carrying — both roles are spread across the whole field, not confined to sub-zones |
+| climb zone (second half only) | 24 – 45 m | 36 | multi-mount climb, 1–2 tiers per pile, tops above the single-leg step-up ceiling |
+| dash approach | 45 – 47 m | — | short sprint, then pick a route up |
+| leap chain | 42.7 – 47.0 m | 3 fixed beams | 0.90 m tops, 1.05 m edge-to-edge gaps, on the centreline |
+| finish platform | 47 – 48 m | — | **1.6 m above the floor** — completion needs height, not just reaching x = 48 m |
 
-**196 boxes total, always** — a fixed number split by role (100/60/36, the original 9/5/6 ratio
-scaled with the room), not itself randomised per round. What varies round to round is each box's
-size, density, and placement jitter, drawn from the round seed (`env/course.sample_boxes`), with a
-real no-overlap placement pass (rejection sampling against a shared footprint registry) so boxes
-don't spawn interpenetrating. See docs/design.md for the packing-fraction math behind the
-room-size-to-box-count ratio, and for the reasoning on why count is fixed rather than sampled
-(short version: sampling count per round would blend policy skill with luck of the draw into one
-noisy number, the same reason upstream keeps its own course geometry fixed and randomises only
-friction/wind).
+**199 boxes every round**: 196 sampled (100/60/36 by role) plus the 3 fixed leap beams. The count
+and the role split are deterministic; what the round seed draws is each box's size, density, grip
+and placement. A rejection-sampling pass against a shared footprint registry keeps them from
+spawning interpenetrating. The count is fixed rather than sampled so that a round's difficulty is
+stable and a score reflects the policy, not the luck of the draw.
 
-Boxes are physical bodies with mass derived from sampled density — pushing and climbing are real
-contact-solver outcomes, not scripted animations.
+Boxes are free bodies with mass derived from sampled density, so pushing, lifting and climbing are
+contact-solver outcomes, not scripted animations. Measured over 20 seeds:
 
-| Zone | Box side (m) | Height (m) | Density (kg/m³) |
-|---|---|---|---|
-| scramble | 0.28 – 0.85 | 0.22 – 0.60 | 60 – 390 (light clutter) |
-| push | 0.35 – 0.80 | 0.18 – 0.42 | 37.5 – 135 (deliberately shovable) |
-| climb | 0.675 – 1.95 per tier | 0.39 – 0.897 per tier | 525 – 2100 (stable footing) |
+| Zone | Side (m) | Height (m) | Density (kg/m³) | Mass (kg) |
+|---|---|---|---|---|
+| scramble | 0.28 – 0.85 | 0.22 – 0.60 | 60 – 390 | 1.1 – 102 |
+| **push** | **0.55 – 0.95** | **0.30 – 0.45** | **18 – 45** | **1.7 – 18.0** |
+| climb (per tier) | 0.60 – 1.95 | 0.39 – 0.79 | 526 – 2097 | 141 – 2730 |
+| leap beam (fixed, ×3) | 0.84 × 0.50 | 0.90 top | 1313 | 496 each |
+
+Push crates are the building block (changed 2026-09-14). They used to be shove-only; they are now
+sized and lightened so a policy can lift one and set it on another — about 0.40 m tall, so four
+stack the full 1.6 m. Climb piles remain immovable by design: they are footing, not cargo.
 
 ```bash
 python -m env.course --seed 1     # print one round's box layout
 python tools/preview.py --seed 1  # stills + flythrough (needs mujoco + ffmpeg)
 ```
 
-## Scoring
+## Friction
 
-Upstream's scoring, plus the evaluation's time budget (`time_limit`, below):
+Every sampled box draws its own **grip, mu 0.40 – 0.85, independently of density** (changed
+2026-09-14; the three fixed leap beams sit at 0.625). Grip is a surface property and mass is a bulk
+one, and deriving one from the other tied them together backwards: the crates light enough to lift
+were also the most slippery. The floor is 0.90, so a crate is still the worse surface to stand on.
+
+The robot has no fingers — a five-joint arm ending in a fused hand — so a crate is held by pinching
+it between two palms. The 0.40 floor is what that pinch needs to hold a median crate at arm's
+length; the top of the band is good footing for a climb.
+
+Declared friction reaches the contact solver via `geom_priority` on the room and crate geoms.
+MuJoCo mixes friction as the element-wise **maximum** at equal priority, and the G1 model declares
+none, so without this every foot contact solved at the robot's 1.0 default and every mu this course
+drew was discarded. That was inert in 0.1.0–0.1.2 and is gated in release CI now.
+
+## Scoring
 
 | Outcome | Score |
 |---|---|
 | completed | `1.0 + (max_steps - steps) / max_steps` → (1.0, 2.0] |
 | fell / timeout / out_of_bounds / time_limit | `progress`, the fraction of the room crossed → [0.0, 1.0) |
-| physics_glitch / invalid / player error | 0.0 |
+| physics_glitch / invalid action / player error | 0.0 |
 
 `raw_score` is the mean over the instances. Progress is continuous along the room regardless of
-which zone a robot is in, so a policy that gets 2 m further into the scramble field scores 2 m
-better even without clearing it — the same continuous-gradient principle upstream uses.
+zone, so a policy that gets 2 m further into the field scores 2 m better even without clearing it.
 
-An instance scores for the room it crossed under its own physics, within both limits it runs
-under: the step cap (`max_steps_per_episode`) and the evaluation's wall-clock budget
-(`time_budget_s`, shared equally across the instances still to run). An instance that reaches its
-share of the clock ends as `time_limit`, and instances the budget never reached end the same way —
-they stay in the mean either way, so the score is always the average over the full suite. Answering
-each `/act` well inside `deadline_ms` is therefore part of the task, not just a limit on it.
+An instance runs under two limits: the step cap (`max_steps_per_episode`) and the suite's
+wall-clock budget (`time_budget_s`, shared equally across the instances still to run). Answering
+each `/act` well inside `deadline_ms` is part of the task, not just a limit on it.
 
 `time_limit` is scored on the progress the run made, not zeroed (changed 2026-09-08). It is the one
-terminal reason a submission does not cause — it means the referee's clock ran out, which depends
-on what else was sharing the machine. Zeroing it made contention decide the score, and hit the best
-runs hardest, since a policy that survives longer is the one that eats the clock. An instance the
-budget never reached still scores 0.0: it made no progress.
+terminal reason a submission does not cause — the referee's clock ran out, which depends on what
+else was sharing the machine. Zeroing it let contention decide the score and hit the best runs
+hardest, since a policy that survives longer is the one that eats the clock.
 
 ## What varies per round, and what does not
 
 The room's *shape* — dimensions, zone lengths, box count and roles — is fixed across every round.
-The field's specific instantiation is not: every box's size, density and position, plus each
-instance's wind, is drawn from one per-round seed (`env/course.sample_boxes`), rotating each round.
-Within a round every instance faces the identical field, so the same submission always scores the
-same. This is upstream's friction/wind randomisation applied one level up: upstream keeps its
-geometry fixed forever and varies only friction and wind, this course varies the field itself.
+The field's instantiation is not: every box's size, density, grip, yaw and position, plus each
+instance's wind, comes from one per-round seed (`env/course.sample_boxes`). Within a round every
+instance faces the identical field and only wind varies, so the same submission scores the same.
+This is upstream's friction/wind randomisation applied one level up.
 
 ## Perception
 
-Same channels as upstream: proprioception, pose on the track, a height scan (9×5 grid, 0.4 m
-behind to 1.6 m ahead) and overhead/forward clearance (7 samples ahead). The height scan reports
-whatever is directly below each ray — floor or a box top, whichever is higher — with no separate
-"this is a box" or "this is zone X" channel. A stack simply reads as a tall step; a scramble
-cluster reads as broken, closely-spaced bumps. See docs/design.md, "What the policy can and cannot
-see", for why that's a deliberate design choice and not a missing feature.
-
-## Submitting
-
-Interface is now `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]` (2026-08-18: was
-byte-for-byte identical to upstream Humanoid Parkour at `obs[104]`/`action[12]`; the arm-control
-change above is a deliberate BREAKING change to that parity). Same 15 MB ONNX cap, same
-recurrent-state contract (feed-forward policies simply return zeros for `state_out`). A
-submission tuned for upstream's legs-only course, or for this course's own pre-arms interface,
-will NOT load here — the tensor shapes no longer match and the player's readiness check rejects
-it as a typed submission failure, not a silent truncation.
+Proprioception, pose on the track, a height scan (9×5 grid, 0.4 m behind to 1.6 m ahead), overhead
+and forward clearance (7 samples), and one proximity ray per hand. The scan reports whatever is
+directly below each ray — floor or box top, whichever is higher — with no "this is a box" or "this
+is zone X" channel, and no box manifest. A stack reads as a tall step; a scramble cluster reads as
+broken, closely-spaced bumps. Wind and box contact state are unobservable, which is what the
+256-wide recurrent state is for.
 
 ## Status
 
-**This spec is a design draft, not yet onboarded.** Before it can go to
-[Competition onboarding](https://github.com/macrocosm-os/apex-competitions-builder/issues/new?template=competition-onboarding.yml),
-the following from `docs/design.md`'s "Open" section still need doing:
+**Released and running on staging, not yet on production.**
 
-1. Player + referee images built, cosign-signed, and pushed by digest (spec.yaml currently carries placeholder digests).
-2. Push-band and climb-band sizing driven against a real (or lightly fine-tuned) policy, the same way upstream calibrated its hurdle/step-up/duck-bar against the stock walker.
-3. Evaluation wall-clock re-profiled under box contact dynamics — free-body physics is more expensive per step than upstream's static geometry, and `evaluate.timeout_s`/`referee.timeout_s`/`max_steps_per_episode` are currently inherited placeholders.
-4. Score variance (σ_round) measured across ≥20 seeds per `reference/evaluation-design.md`'s sizing procedure, to confirm or revise `num_instances` (currently inherited at 24).
-5. A baseline policy built and scored end-to-end, with its provenance recorded in `baseline/PROVENANCE.md` (currently unset — `defaults.baseline_raw_score: 0.0` is a placeholder, not a measurement).
+- v0.1.6 is built, cosign-signed and pinned by digest in `spec.yaml`; release CI gates actuator
+  pairing, box-field disjointness, round reproducibility, replay round-trip, friction reaching the
+  solver, history compaction, and response handling.
+- Active on the `stage` and `pr` registry pointers. Production runs an allowlist
+  (`SPEC_DRIVEN_EVAL`) that does not yet include `humanoid_box_scramble`, so a prod activation
+  needs that list updated first.
+- Sizing is measured, not inherited: 12 × 2000 at `time_budget_s` 700 fits with headroom (478 s
+  for a full 12-instance suite on staging). The 24 × 3000 inherited from upstream did not.
+
+Open before it can be treated as calibrated:
+
+1. **The course is not proven solvable.** Zero completions across ~3,800 instances; the furthest
+   any policy has reached is 19.9 m of 48 m. 0.1.6 opened both routes up — stackable push crates
+   and a wider, lower leap beam — but neither has been shown to work end to end.
+2. `defaults.baseline_raw_score` is 0.0, a placeholder. `baseline/PROVENANCE.md` still describes
+   the pre-2026-08-18 104-d/12-d interface and needs re-running at 22 DoF.
+3. Arm PD gains are reasoned from the model's torque limits, not tuned against a trained policy.
+4. History is ~49 MB per submission and grows with how long a policy survives — re-check it before
+   raising `max_steps_per_episode`.
 
 ## Repo layout
 
 ```
 env/            room + box-field sampling, physics, perception, gates, scoring, history format
-  course.py     FORKED — the room and box field (was: the linear maneuver sequence)
-  sim.py        FORKED — round-scoped scene compilation, box-aware ray casts (was: course-scoped)
-  scoring.py    unchanged from upstream
-  history.py    forked — records the sampled box field as each instance's conditions
-  assets/       vendored Unitree G1 12-DoF model + collision meshes (BSD-3), unchanged
-player/         ONNX serving + interface validation (player image), unchanged from upstream
-referee/        forked — match driver reads the new env/ modules; no friction/mu in metadata
-baseline/       PROVENANCE.md carried from upstream; NOT yet re-run against this course (see Status)
-tools/          forked — preview builds a scene from a seed, replay from a recorded box field
-docs/           design notes, including the box-count-fixed-vs-variable decision and open items
-spec.yaml       the competition manifest — placeholder image digests, inherited timeout/sizing
+  course.py     the room and box field, sampled per round
+  sim.py        round-scoped scene compilation, box-aware ray casts, termination gates
+  scoring.py    instance -> score
+  history.py    box_scramble_history/3 — robot qpos plus only the boxes that moved
+  assets/       vendored Unitree G1 22-DoF model + collision meshes (BSD-3)
+player/         ONNX serving + interface validation (player image)
+referee/        match driver over gym_v1 (referee image)
+baseline/       baseline.onnx + PROVENANCE.md — predates the 22-DoF interface, see Status
+tools/          preview, replay, local eval, course-layout export, policy builders
+docs/           course-layout.json — the room shell for a renderer (the box field is per-round)
+.github/        release workflow and its physics/format gates
+spec.yaml       the competition manifest
 ```
 
 ## Provenance
@@ -169,5 +167,5 @@ Built as a fork of
 [macrocosm-os/apex-competition-humanoid-parkour](https://github.com/macrocosm-os/apex-competition-humanoid-parkour),
 itself built from
 [apex-competition-hello-world](https://github.com/macrocosm-os/apex-competition-hello-world). The
-robot model, `gym_v1` vendoring, player serving logic, and scoring formula are carried over
-unmodified; the room, box field, and their sampling/physics are new.
+robot model, `gym_v1` vendoring, player serving logic, and scoring formula are carried over; the
+room, box field, and their sampling/physics are new.

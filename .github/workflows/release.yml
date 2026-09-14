@@ -17,8 +17,8 @@
 # Carried over from humanoid_parkour's workflow. ONE GATE IS DELIBERATELY ABSENT: parkour asserts
 # its published baseline scores above zero, and this competition has no baseline yet — the
 # inherited baseline/baseline.onnx is upstream's obs[104]/action[12] artifact and cannot load
-# against this interface at all (README "Status", docs/design.md "Open"). The conforming-policy
-# gate below covers what that gate covered about the LOOP; nothing here yet covers "a real policy
+# against this interface at all (README "Status"). The conforming-policy gate below covers what
+# that gate covered about the LOOP; nothing here yet covers "a real policy
 # gets a real score", and that is a known gap, not an oversight.
 name: release
 

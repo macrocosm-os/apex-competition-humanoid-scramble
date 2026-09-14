@@ -1,6 +1,6 @@
 """Measure ONNX inference latency vs model size, single-threaded, at the competition's signature.
 
-This is the evidence behind `submission.max_size_mb` (docs/design.md). The cap is only defensible
+This is the evidence behind `submission.max_size_mb`. The cap is only defensible
 if a model at the limit still fits the referee's time budget on the hardware the platform actually
 runs, so this is meant to be run in CI on a real worker-class CPU, not just on a dev machine.
 

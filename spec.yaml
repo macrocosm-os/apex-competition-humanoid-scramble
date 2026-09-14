@@ -9,7 +9,7 @@ process_type: cpu
 # same gym_v1 protocol, same resource profile to start with -- the fork changes the OBSTACLE (a
 # per-round-sampled field of 196 loose boxes in a 48 m x 6 m room) rather than the runtime
 # contract, so the upstream competition's own measured resource numbers are the right starting
-# prior. Re-measure before onboarding rather than trusting this note (HANDOFF SS4 requires it):
+# prior. Re-measure before onboarding rather than trusting this note:
 # box free-body physics is more expensive per step than parkour's static geometry (196 free
 # bodies, many in contact), and this spec has not yet been profiled under its own limits the way
 # upstream's was.
@@ -88,7 +88,7 @@ defaults:
   # 0.0 by choice, same reasoning as upstream parkour: this is the platform's ENTRY BAR
   # (score_to_beat = max(this, top_raw) * 1.01) and must not sit above the true measured
   # baseline or the round stalls forever. Replace with the measured baseline/PROVENANCE.md
-  # number before onboarding (HANDOFF.md SS2/SS4) -- unmeasured here because the baseline for
+  # number before onboarding -- unmeasured here because the baseline for
   # THIS course (box contact dynamics, not parkour's fixed geometry) has not been run yet.
   baseline_raw_score: 0.0
   round_length_in_days: 1

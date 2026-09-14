@@ -1,9 +1,9 @@
 """MuJoCo simulation of one Box Scramble episode.
 
 Fork of Humanoid Parkour's sim.py. Robot, action/PD-loop, wind model, and most gates are
-unchanged from upstream (see docs/design.md for the full audit trail on those). What's forked is
-the scene itself: instead of a fixed sequence of named maneuvers, the robot crosses a 12 m x 6 m
-room scattered with a per-round-sampled field of loose boxes (env/course.py) that are free bodies,
+unchanged from upstream. What's forked is the scene itself: instead of a fixed sequence of named
+maneuvers, the robot crosses a 48 m x 6 m room scattered with a per-round-sampled field of loose
+boxes (env/course.py) that are free bodies,
 not welded geoms — pushing and climbing are genuine contact-solver outcomes.
 
 Robot: Unitree G1, 22 actuated DoF (`env/assets/g1_22dof.xml`) -- 12 leg joints (unchanged from
@@ -13,10 +13,9 @@ the original fork) plus 10 arm joints (5 per arm: shoulder pitch/roll/yaw, elbow
 because this course involves pushing, lifting, and climbing -- a legs-only robot could only
 body-check boxes and mount climb stacks leg-first; full arm control lets a policy actually grasp,
 brace, and shove with its hands, which the brief calls for explicitly. This reverses what the
-fork's original design doc called a deliberate "one-way door" (see docs/design.md's audit trail,
-kept as historical record, not deleted) -- the interface, PD gains, and default pose below are
-all new to reflect the arm joints; ACT_DIM/OBS_DIM changed accordingly (see below), which means
-any submission built against the old 12-DoF/104-obs interface will NOT load against this course
+fork originally called a deliberate "one-way door" -- the interface, PD gains, and default pose
+below are all new to reflect the arm joints; ACT_DIM/OBS_DIM changed accordingly (see below),
+which means any submission built against the old 12-DoF/104-obs interface will NOT load here
 without retraining -- an explicit, accepted breaking change per this request, not an oversight.
 Arm joint specs (ranges, actuatorfrcrange, masses/inertias) are taken directly from Unitree's own
 published 29-DoF G1 MJCF (unitreerobotics/unitree_rl_gym), not invented -- with one adaptation:
@@ -131,9 +130,9 @@ RAY_FROM_ABOVE = 4.0             # raised from parkour's 3.0 m: must clear the t
 # force limit -- e.g. shoulder KP ~= leg hip KP * (25/88) -- rather than reusing leg-scale gains
 # outright, which would be too stiff for the arms' much lower torque budget and PD-oscillate.
 # FLAGGED AS UNVALIDATED: unlike the legs (Unitree-measured), these have not been tuned against
-# a real trained policy attempting to push/lift/climb -- see docs/design.md "Open" list, which
+# a real trained policy attempting to push/lift/climb -- see the README's "Status", which
 # already carries an equivalent flag for the push/climb box bands; arm PD gains are the same
-# category of gap and should be added there.
+# category of gap.
 #
 # Joint order (must match env/assets/g1_22dof.xml's <actuator> block exactly):
 #   [0:12]  legs: L hip pitch/roll/yaw, knee, ankle pitch/roll, R hip pitch/roll/yaw, knee,
@@ -166,7 +165,7 @@ GAIT_PERIOD = 0.8
 
 # Wind, via MuJoCo's inertia-box fluid model: opt.wind is subtracted from each body's linear
 # velocity and quadratic drag follows, so it only bites with opt.density > 0. Air at 20 C.
-# Unchanged from upstream parkour -- see docs/design.md "Wind" for the full derivation.
+# Unchanged from upstream parkour.
 AIR_DENSITY = 1.204
 WIND_MAX_MS = 8.0
 
@@ -240,8 +239,8 @@ def _scene_xml(floor_frag: str, boxes_frag: str) -> str:
 # only friction (a runtime field on a fixed-geometry model) varied between rounds. Box SIZE and
 # PLACEMENT are compile-time (MJCF geom size/pos), so there is one compiled MjModel per ROUND
 # SEED, cached and reused across every instance within that round -- the round-level analogue of
-# parkour's "compile once, reuse across instances" optimisation (docs/design.md, "The scene is
-# compiled once, not per instance"). A single referee process only ever evaluates one round, so
+# parkour's "compile once, reuse across instances" optimisation. A single referee process only
+# ever evaluates one round, so
 # the cache holds exactly one entry in practice; keeping it a dict (not a single slot) just means
 # a local tool that walks multiple seeds in one process doesn't recompile needlessly either.
 _MODEL_CACHE: dict[int, tuple[mujoco.MjModel, list[int], list]] = {}
@@ -429,7 +428,7 @@ class ParkourSim:
         # one ray per hand, cast forward from each wrist body along the robot's own forward axis,
         # returning plain distance to the nearest surface (box or floor) -- a continuous distance
         # value, not a labelled "box present" bit, for the same reason the height scan itself is
-        # unlabelled (docs/design.md, "What the policy can and cannot see"): a policy should
+        # unlabelled (see the README's "Perception"): a policy should
         # perceive proximity and decide what to do about it, not read a flag saying what's there.
         hand_dist = np.array([
             self._ray_forward(self.model.body("left_wrist_roll_link").id, HAND_RAY_RANGE),
