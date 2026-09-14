@@ -23,13 +23,14 @@ structural change.
 
 ## The four differences
 
-### 1. `format` is `box_scramble_history/2`
+### 1. `format` is `box_scramble_history/3`
 
 Parkour writes `humanoid_parkour_history/1`. A reader that whitelists the exact parkour string will
 reject every file this competition produces. Match on the family, or add this one.
 
-The trailing number is the format's own version and will move independently of the competition
-version: `/1` wrote a different frame layout (see §2) and files in that shape may still exist.
+The trailing number is the format's own version and moves independently of the competition
+version. `/1` wrote a different frame layout (see §2) and `/2` had no per-box friction column
+(see §3); files in both shapes still exist, so read the version rather than assuming the newest.
 
 ### 2. The robot is 22-DoF, so `frames.nq` is 29, not 19
 
@@ -52,13 +53,17 @@ likely to produce a silently wrong render rather than an error.
 | `wind_speed_ms`, `wind_dir_deg` | `wind_speed_ms`, `wind_dir_deg` |
 
 `box_field` is `{fields, zones, values}`: one row per box, columns
-`cx cy cz hx hy hz density yaw`, plus a parallel list of zone labels
+`cx cy cz hx hy hz density yaw friction`, plus a parallel list of zone labels
 (`scramble` / `push` / `climb`). Half-extents, so double them for a renderer that wants full sizes.
+
+`friction` is new in `/3` (a `/2` record has eight columns and no friction). Read the column
+positions from `fields` rather than by index. Grip is drawn independently of density, so it is
+not derivable from the `density` column of an older record.
 
 Neither the round seed nor the per-instance seed appears in a record, by design. The conditions are
 what the run faced, not the inputs that produced them.
 
-### 4. There are 196 boxes, and they move
+### 4. There are 199 boxes, and they move
 
 This is the real work. Parkour's scene is static geometry; here the obstacle *is* a field of loose
 free bodies, and a replay that draws only the robot shows nothing of what happened.
@@ -73,9 +78,9 @@ Render every box at its `rest` pose, then animate the ones in `indices`. A box a
 `indices` never moved by more than a millimetre; `env.history.reconstruct_qpos()` is the reference
 implementation and rebuilds the full `nq_model`-wide qpos if you would rather work with that.
 
-Recording only the movers is why an instance file is ~0.7 MB rather than ~3.6 MB. Format `/1` wrote
-all 196 boxes every frame and produced ~119 MB of history per submission; do not assume old files
-are cheap.
+Recording only the movers is what keeps this affordable: format `/1` wrote all 199 boxes every
+frame and produced ~119 MB of history per submission. Instance files still range from ~0.8 MB to
+~6.4 MB, because size scales with how long the policy survives, not with the box count.
 
 ## The course preview
 
