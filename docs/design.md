@@ -76,7 +76,7 @@ declared-but-non-randomised round-input field (e.g. `difficulty: "standard"|"den
 being a live, defensible alternative that preserves determinism per tier — rejected for now only
 because there is no evidence yet that miners need more than one difficulty point, and shipping
 tiers before that evidence exists fragments the leaderboard's statistical basis (each tier would
-need its own evaluation-sizing pass, HANDOFF.md SS4) for a need that hasn't been demonstrated.
+need its own evaluation-sizing pass) for a need that hasn't been demonstrated.
 **Revisit this rejection once round-over-round score data shows convergence** — the tiered-input
 approach remains the right next move if/when that happens, not a version bump, because at that
 point the operator wants a lever without a release cycle.
@@ -179,7 +179,7 @@ across every instance in that round — a single referee process only evaluates 
 practice this is exactly as cheap as upstream's single compiled model, just re-derived from a
 different cache key.
 
-**What has NOT been validated and is real, stated risk carried into HANDOFF.md**: boxes are free
+**What has NOT been validated, and is a real, stated risk**: boxes are free
 bodies with active contact constraints (up to 20 simultaneously, more when several are touching
 in a scramble cluster or a climb stack), which is categorically more expensive per physics step
 than upstream's all-static-geometry course. `spec.yaml`'s `evaluate.timeout_s` / `referee.timeout_s`
@@ -284,7 +284,7 @@ THRESHOLD changed, not the continuous-gradient scoring shape.
 3. **Score variance (sigma_round) for this course has not been measured.** Upstream's own sizing
    procedure (measure sigma_round across >=20 seeds with a real policy, check it against 1/4 of
    the 1% takeover margin) applies here too and has not been run — required before finalising
-   `num_instances` in HANDOFF.md SS4. Box contact outcomes (does a push connect solidly or glance
+   `num_instances`. Box contact outcomes (does a push connect solidly or glance
    off; does a climb mount succeed on the first attempt) are plausibly a source of MORE
    per-instance variance than upstream's friction/wind alone, which argues for measuring rather
    than assuming the inherited N=24 is sufficient.

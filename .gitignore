@@ -12,3 +12,6 @@ venv/
 .env
 .env.*
 !.env.template
+
+# Local miner CLI state -- carries wallet/hotkey paths off this machine.
+.apex.config.json
