@@ -18,7 +18,6 @@ directly. The finish is 1.6 m up, so the crossing has to end in a climb or a lea
 | submission | ONNX graph, ≤ 15 MB, architecture free |
 | interface | `obs[136]` + `state_in[256]` → `action[22]` + `state_out[256]`, float32 |
 | evaluation | 12 instances × ≤ 2000 control steps, 700 s suite budget, 500 ms per `/act` — the round input, which lives in the competition row, not in `spec.yaml` |
-| rounds | 1 day; a submission's model is revealed 1 day after it is submitted |
 | control | 50 Hz control on 500 Hz physics, PD position targets |
 | history | `box_scramble_history/3` — robot pose plus every box that moved; `env/history.py` is the reader |
 | baseline | `defaults.baseline_raw_score: 0.0` — still a placeholder, not a measurement (see Status) |
