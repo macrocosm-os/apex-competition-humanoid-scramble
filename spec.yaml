@@ -1,6 +1,6 @@
 schema: apex.competition.v1
 id: humanoid_box_scramble
-version: 0.1.6
+version: 0.1.7
 display_name: "Humanoid Box Scramble"
 kind: solo
 process_type: cpu
@@ -22,9 +22,13 @@ resources:
 # .github/workflows/release.yml). `image` is the PLAYER image (loads + serves the miner's ONNX
 # policy).
 #
-# Pinned from the v0.1.6 release run (Actions run 34855196763, all four jobs green), both
-# cosign-verified: SAN `.../release.yml@refs/tags/v0.1.6` against this file's identity glob,
-# GitHub OIDC issuer, githubWorkflowSha 2068d6e = v0.1.6^{commit}. The platform pins by digest.
+# NOTE: these digests are still v0.1.6's. `apex-dev preflight` gates the release job and rejects
+# a malformed digest, so the tag has to carry format-valid ones; the v0.1.7 digests are pinned in
+# a follow-up PR once the release run publishes them. Do not activate 0.1.7 before that lands.
+#
+# 0.1.7 is a config-only change: the round and reveal defaults go 1 day -> 2 days. Both are
+# seeding values copied into the competition row at onboarding, so this only affects a NEW row;
+# an existing competition keeps whatever its row says. Referee and player code is 0.1.6's.
 #
 # 0.1.6 makes the course climbable by hand as well as by foot. Push crates are now a carryable
 # building block (0.55-0.95 m wide, 0.30-0.45 m tall, 12-30 kg/m3) rather than a shove-only
@@ -39,7 +43,7 @@ resources:
 # player code is 0.1.4's. It is a NEW competition_key: existing box_scramble spec versions and
 # any competition row still on the old pkg do not carry over.
 #
-# 0.1.4 is a config-only change: 1-day rounds and a 1-day model reveal.
+# 0.1.4 is a config-only change to the round and reveal defaults.
 #
 # 0.1.3 makes declared surface friction reach the solver (geom_priority on room and crate geoms).
 # It was inert in 0.1.0-0.1.2, so crate density set mass but not grip.
@@ -91,8 +95,11 @@ defaults:
   # number before onboarding -- unmeasured here because the baseline for
   # THIS course (box contact dynamics, not parkour's fixed geometry) has not been run yet.
   baseline_raw_score: 0.0
-  round_length_in_days: 1
-  submission_reveal_days: 1
+  # Required by the schema, but a SEEDING value only: both are copied into the competition row
+  # at onboarding and are edited there afterwards. The row is the live value, and the published
+  # docs page is what states it -- do not treat these two numbers as the current setting.
+  round_length_in_days: 2
+  submission_reveal_days: 2
   lower_is_better: false
 
 entrypoints:
