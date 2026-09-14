@@ -529,11 +529,14 @@ FINISH_RISE = 1.6
 # against a real trained policy (same open-gap category as the push/climb band sizing in
 # docs/design.md) -- flagged there, not silently assumed correct.
 LEAP_COUNT = 3                 # 3 stepping-stone boxes between dash-zone floor and the platform
-LEAP_SIDE = (0.42, 0.25, 0.55)  # half-extent x/y. Widened 0.06 -> 0.25 (0.12 -> 0.50 m) on
-                                 # 2026-09-14: at 0.12 m the beam was 1.7 G1 foot-widths, so the
-                                 # route was unlandable rather than demanding.
-LEAP_TOP = FINISH_RISE - 0.25    # 1.35 m: below platform height so the final hop is a step-up,
-                                  # not another full mount
+# Beam top, metres above the deck. Lowered 1.10 -> 0.90 on 2026-09-14: the first move onto the
+# chain is a standing mount, and 1.10 m was well over the G1's 0.70 m hip. Still above the hip,
+# so this eases the route rather than solving it. LEAP_TOP was previously dead -- the height came
+# from LEAP_SIDE's hz and this constant was never read, while its comment claimed otherwise.
+LEAP_TOP = 0.90
+LEAP_SIDE = (0.42, 0.25, LEAP_TOP / 2)  # half-extent x/y/z. Width widened 0.06 -> 0.25
+                                         # (0.12 -> 0.50 m) the same day: at 0.12 m the beam was
+                                         # 1.7 G1 foot-widths, unlandable rather than demanding.
 LEAP_GAP = 1.05                  # metres between consecutive waypoint-box faces (edge to edge,
                                   # not centre to centre) -- a committed but plausible standing gap
 
